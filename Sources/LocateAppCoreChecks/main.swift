@@ -113,6 +113,39 @@ func runChecks() throws {
         "/repo/.venv/bin/pymobiledevice3", "developer", "dvt", "simulate-location",
         "clear", "--rsd", "fd99:1792:87b6::1", "54429"
     ], "clear command mismatch")
+    try check(
+        paths.stateDirectory.path == "/repo/.locateapp",
+        "repo-local state directory mismatch"
+    )
+
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LocateAppCoreChecks-\(UUID().uuidString)", isDirectory: true)
+    let appResources = tempRoot
+        .appendingPathComponent("LocateApp.app/Contents/Resources", isDirectory: true)
+    let bundledHelperDirectory = appResources
+        .appendingPathComponent("pymobiledevice3-helper", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: bundledHelperDirectory,
+        withIntermediateDirectories: true
+    )
+    let bundledHelper = bundledHelperDirectory.appendingPathComponent("pymobiledevice3-helper")
+    FileManager.default.createFile(atPath: bundledHelper.path, contents: Data("#!/bin/sh\n".utf8))
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bundledHelper.path)
+    defer {
+        try? FileManager.default.removeItem(at: tempRoot)
+    }
+
+    let bundledPaths = try LocatePaths.discover(
+        startingAt: tempRoot.appendingPathComponent("LocateApp.app", isDirectory: true)
+    )
+    try check(
+        bundledPaths.pymobiledevicePath.path == bundledHelper.path,
+        "bundled helper path mismatch"
+    )
+    try check(
+        bundledPaths.stateDirectory.path.contains("/Library/Application Support/LocateApp/.locateapp"),
+        "bundled app should use Application Support for writable state"
+    )
 
     try check(Shell.quote("abc") == "'abc'", "simple shell quote mismatch")
     try check(Shell.quote("a'b") == "'a'\\''b'", "single quote escaping mismatch")

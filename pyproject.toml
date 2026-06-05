@@ -12,6 +12,8 @@ locate-poc = "locateapp.cli:main"
 
 [project.optional-dependencies]
 dev = [
+  "Pillow==12.2.0",
+  "pyinstaller==6.17.0",
   "pytest==9.0.2",
 ]
 

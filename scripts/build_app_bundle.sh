@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/dist/LocateApp.app"
 EXECUTABLE="$APP/Contents/MacOS/LocateApp"
 CONFIGURATION="${CONFIGURATION:-debug}"
+BUNDLE_HELPER="${BUNDLE_HELPER:-0}"
+APP_VERSION="${APP_VERSION:-0.1.0}"
 
 cd "$ROOT"
 
@@ -22,6 +24,7 @@ fi
 command -v swift >/dev/null
 command -v plutil >/dev/null
 command -v codesign >/dev/null
+command -v iconutil >/dev/null
 
 case "$CONFIGURATION" in
   debug|release)
@@ -40,6 +43,25 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/LocateApp" "$EXECUTABLE"
 
+"$ROOT/.venv/bin/python" "$ROOT/scripts/generate_app_icon.py" \
+  --output "$APP/Contents/Resources/AppIcon.icns" \
+  --preview "$APP/Contents/Resources/AppIcon.png"
+
+case "$BUNDLE_HELPER" in
+  0|false|no)
+    ;;
+  1|true|yes)
+    "$ROOT/scripts/build_helper.sh"
+    HELPER_DIR="${HELPER_DIST_DIR:-$ROOT/build/helper-dist}/pymobiledevice3-helper"
+    rm -rf "$APP/Contents/Resources/pymobiledevice3-helper"
+    cp -R "$HELPER_DIR" "$APP/Contents/Resources/pymobiledevice3-helper"
+    ;;
+  *)
+    echo "BUNDLE_HELPER must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -56,8 +78,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <string>LocateApp</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>__APP_VERSION__</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -67,6 +91,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+perl -0pi -e "s/__APP_VERSION__/$APP_VERSION/g" "$APP/Contents/Info.plist"
 
 plutil -lint "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"

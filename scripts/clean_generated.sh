@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 rm -rf \
   .build \
+  build \
   .pytest_cache \
   locateapp.egg-info \
   src/locateapp.egg-info
