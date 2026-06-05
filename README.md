@@ -32,6 +32,13 @@ open dist/LocateApp.app
 iteration light. Use `CONFIGURATION=release ./scripts/build_app_bundle.sh` when
 you have enough free disk space and want a release build.
 
+For a self-contained app bundle that can be copied to another Mac without a
+repo-local `.venv`, bundle the helper:
+
+```bash
+BUNDLE_HELPER=1 CONFIGURATION=release ./scripts/build_app_bundle.sh
+```
+
 In the app:
 
 1. Connect and unlock the iPhone.
@@ -64,9 +71,30 @@ command fails.
 4. If reset cannot reach the iPhone, restart the iPhone. iOS restart is the
    authoritative fallback for clearing simulated location.
 
-This `.app` is ad-hoc signed for local use. It is not notarized for distribution.
-The app does not bundle `pymobiledevice3`; keep `dist/LocateApp.app` inside this
-repository layout so it can find `.venv/bin/pymobiledevice3`.
+Local debug builds are ad-hoc signed. Release packages embed the
+`pymobiledevice3` helper inside the app bundle, so the app can run without a
+repo-local `.venv`.
+
+## Install from GitHub Releases
+
+Download the latest `LocateApp-*-mac-arm64.dmg` or `.zip` from
+[GitHub Releases](https://github.com/HirokiAbe-CINCA/LocateApp/releases).
+Open the DMG or unzip the archive, then copy `LocateApp.app` to `/Applications`.
+
+Release builds are ad-hoc signed but not notarized yet. On the first launch,
+macOS may require right-clicking `LocateApp.app` and choosing `Open`.
+The embedded helper is intentionally self-contained; commands such as Refresh
+or Reset can take longer than repo-local development builds while the helper
+starts.
+
+Release artifacts are produced by pushing a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The Release workflow uploads the DMG, ZIP, and `SHA256SUMS.txt`.
 
 ## Cleanup
 

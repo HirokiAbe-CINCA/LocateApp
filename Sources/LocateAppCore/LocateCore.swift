@@ -164,10 +164,12 @@ public enum DeveloperMode {
 
 public struct LocatePaths: Equatable, Sendable {
     public let root: URL
+    public let stateRoot: URL
     public let pymobiledevicePath: URL
 
-    public init(root: URL, pymobiledevicePath: URL) {
+    public init(root: URL, pymobiledevicePath: URL, stateRoot: URL? = nil) {
         self.root = root
+        self.stateRoot = stateRoot ?? root
         self.pymobiledevicePath = pymobiledevicePath
     }
 
@@ -177,6 +179,14 @@ public struct LocatePaths: Equatable, Sendable {
     ) throws -> LocatePaths {
         var candidate = startURL
         if candidate.pathExtension == "app" {
+            let resources = candidate.appendingPathComponent("Contents/Resources", isDirectory: true)
+            if let helper = bundledHelper(in: resources, fileManager: fileManager) {
+                return LocatePaths(
+                    root: candidate,
+                    pymobiledevicePath: helper,
+                    stateRoot: applicationSupportRoot(fileManager: fileManager)
+                )
+            }
             candidate.deleteLastPathComponent()
         }
 
@@ -198,7 +208,26 @@ public struct LocatePaths: Equatable, Sendable {
     }
 
     public var stateDirectory: URL {
-        root.appendingPathComponent(".locateapp", isDirectory: true)
+        stateRoot.appendingPathComponent(".locateapp", isDirectory: true)
+    }
+
+    private static func bundledHelper(in resources: URL, fileManager: FileManager) -> URL? {
+        let candidates = [
+            resources.appendingPathComponent("pymobiledevice3-helper/pymobiledevice3-helper"),
+            resources.appendingPathComponent("pymobiledevice3-helper"),
+            resources.appendingPathComponent("pymobiledevice3")
+        ]
+        return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func applicationSupportRoot(fileManager: FileManager) -> URL {
+        if let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return support.appendingPathComponent("LocateApp", isDirectory: true)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(
+            "Library/Application Support/LocateApp",
+            isDirectory: true
+        )
     }
 
     public var listDevicesCommand: [String] {

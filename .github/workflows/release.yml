@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Python helper dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e '.[dev]'
+
+      - name: Verify
+        run: |
+          .venv/bin/python -m pytest
+          swift run LocateAppCoreChecks
+          swift build
+          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh
+
+      - name: Package release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.zip \
+            release/*.dmg \
+            release/SHA256SUMS.txt \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release/RELEASE_NOTES.md
