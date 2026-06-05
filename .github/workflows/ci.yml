@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python helper
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e '.[dev]'
+
+      - name: Python tests
+        run: .venv/bin/python -m pytest
+
+      - name: Swift core checks
+        run: swift run LocateAppCoreChecks
+
+      - name: Swift build
+        run: swift build
+
+      - name: Script syntax
+        run: bash -n scripts/build_app_bundle.sh scripts/e2e_smoke.sh

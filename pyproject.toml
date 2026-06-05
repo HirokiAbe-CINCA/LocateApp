@@ -1,0 +1,20 @@
+[project]
+name = "locateapp"
+version = "0.1.0"
+description = "Xcode-less CLI proof for setting a connected iPhone's simulated location."
+requires-python = ">=3.13"
+dependencies = [
+  "pymobiledevice3==9.16.0",
+]
+
+[project.scripts]
+locate-poc = "locateapp.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
