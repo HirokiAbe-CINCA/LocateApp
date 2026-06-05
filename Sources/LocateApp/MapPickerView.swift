@@ -100,5 +100,21 @@ struct MapPickerView: NSViewRepresentable {
                 mapView.addAnnotation(fixedAnnotation)
             }
         }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            guard annotation === self.annotation || annotation === fixedAnnotation else {
+                return nil
+            }
+
+            let isFixed = annotation === fixedAnnotation
+            let identifier = isFixed ? "fixed-location-pin" : "selected-location-pin"
+            let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            view.annotation = annotation
+            view.canShowCallout = true
+            view.markerTintColor = isFixed ? .systemOrange : .systemBlue
+            view.glyphText = isFixed ? "F" : "S"
+            return view
+        }
     }
 }
