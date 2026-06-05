@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/dist/LocateApp.app"
 EXECUTABLE="$APP/Contents/MacOS/LocateApp"
+CONFIGURATION="${CONFIGURATION:-debug}"
 
 cd "$ROOT"
 
@@ -22,11 +23,22 @@ command -v swift >/dev/null
 command -v plutil >/dev/null
 command -v codesign >/dev/null
 
-swift build -c release --product LocateApp
+case "$CONFIGURATION" in
+  debug|release)
+    ;;
+  *)
+    echo "CONFIGURATION must be debug or release" >&2
+    exit 1
+    ;;
+esac
+
+echo "Building $CONFIGURATION app bundle..."
+swift build -c "$CONFIGURATION" --product LocateApp
+BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$ROOT/.build/release/LocateApp" "$EXECUTABLE"
+cp "$BIN_DIR/LocateApp" "$EXECUTABLE"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

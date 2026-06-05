@@ -28,6 +28,10 @@ python3.13 -m venv .venv
 open dist/LocateApp.app
 ```
 
+`build_app_bundle.sh` builds a debug app bundle by default to keep local
+iteration light. Use `CONFIGURATION=release ./scripts/build_app_bundle.sh` when
+you have enough free disk space and want a release build.
+
 In the app:
 
 1. Connect and unlock the iPhone.
@@ -63,6 +67,18 @@ command fails.
 This `.app` is ad-hoc signed for local use. It is not notarized for distribution.
 The app does not bundle `pymobiledevice3`; keep `dist/LocateApp.app` inside this
 repository layout so it can find `.venv/bin/pymobiledevice3`.
+
+## Cleanup
+
+To recover local disk space without deleting the Python helper or the latest
+local app bundle:
+
+```bash
+./scripts/clean_generated.sh
+```
+
+This removes SwiftPM and Python test/build caches, while keeping `.venv` and
+`dist/LocateApp.app`.
 
 ## CLI Proof Tools
 

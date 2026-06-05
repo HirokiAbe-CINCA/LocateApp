@@ -110,6 +110,11 @@ final class AppModel: ObservableObject {
         Task {
             isSearching = true
             status = "Searching for \(query)..."
+            defer {
+                if requestSerial == searchRequestSerial {
+                    isSearching = false
+                }
+            }
             do {
                 let results = try await searchService.search(query: query, near: selectedMapCoordinate)
                 guard requestSerial == searchRequestSerial else {
@@ -123,9 +128,6 @@ final class AppModel: ObservableObject {
                 }
                 searchResults = []
                 status = "Search failed: \(userFacingMessage(for: error))"
-            }
-            if requestSerial == searchRequestSerial {
-                isSearching = false
             }
         }
     }
