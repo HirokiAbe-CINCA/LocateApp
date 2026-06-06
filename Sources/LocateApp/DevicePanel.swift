@@ -249,6 +249,18 @@ struct DevicePanel: View {
                 .lineLimit(3)
                 .minimumScaleFactor(0.8)
                 .textSelection(.enabled)
+
+            if let caution = model.activeLocationCaution {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: model.isPreventingSleep ? "moon.zzz.slash" : "exclamationmark.triangle.fill")
+                        .frame(width: 14)
+                    Text(caution)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .foregroundStyle(model.isPreventingSleep ? Color.secondary : Color.orange)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
