@@ -6,7 +6,14 @@ APP="$ROOT/dist/LocateApp.app"
 EXECUTABLE="$APP/Contents/MacOS/LocateApp"
 CONFIGURATION="${CONFIGURATION:-debug}"
 BUNDLE_HELPER="${BUNDLE_HELPER:-0}"
-APP_VERSION="${APP_VERSION:-0.1.0}"
+if [[ -z "${APP_VERSION:-}" ]]; then
+  if VERSION_TAG="$(git describe --tags --abbrev=0 2>/dev/null)"; then
+    APP_VERSION="${VERSION_TAG#v}"
+  else
+    APP_VERSION="0.1.0"
+  fi
+fi
+APP_BUILD="${APP_BUILD:-${GITHUB_RUN_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}}"
 
 cd "$ROOT"
 
@@ -83,7 +90,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key>
   <string>__APP_VERSION__</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>__APP_BUILD__</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
@@ -93,6 +100,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 perl -0pi -e "s/__APP_VERSION__/$APP_VERSION/g" "$APP/Contents/Info.plist"
+perl -0pi -e "s/__APP_BUILD__/$APP_BUILD/g" "$APP/Contents/Info.plist"
 
 plutil -lint "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"

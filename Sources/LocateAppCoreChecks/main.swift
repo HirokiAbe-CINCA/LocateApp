@@ -57,6 +57,8 @@ func runChecks() throws {
     let endpoint = try RSDEndpoint.parse("fd99:1792:87b6::1 54429\n")
     try check(endpoint.host == "fd99:1792:87b6::1", "RSD host mismatch")
     try check(endpoint.port == "54429", "RSD port mismatch")
+    let endpointWithNoise = try RSDEndpoint.parse("Preparing tunnel\nfd99:1792:87b6::1 54429\n")
+    try check(endpointWithNoise == endpoint, "RSD endpoint with leading output did not parse")
     try checkThrows("invalid RSD output did not throw") {
         _ = try RSDEndpoint.parse("not enough")
     }
@@ -199,6 +201,10 @@ func runChecks() throws {
         "set process matcher did not match set command"
     )
     try check(
+        ProcessMatcher.isSimulatedLocationSetCommand("/Applications/LocateApp.app/Contents/Resources/pymobiledevice3-helper/pymobiledevice3-helper developer dvt simulate-location set --rsd host 1 -- 1 2"),
+        "set process matcher did not match bundled helper command"
+    )
+    try check(
         !ProcessMatcher.isSimulatedLocationSetCommand("/repo/.venv/bin/pymobiledevice3 developer dvt simulate-location clear --rsd host 1"),
         "set process matcher matched clear command"
     )
@@ -213,6 +219,10 @@ func runChecks() throws {
     try check(
         ProcessMatcher.isTunnelCommand("/repo/.venv/bin/pymobiledevice3 lockdown start-tunnel --script-mode --udid id"),
         "tunnel process matcher did not match tunnel command"
+    )
+    try check(
+        ProcessMatcher.isTunnelCommand("/Applications/LocateApp.app/Contents/Resources/pymobiledevice3-helper/pymobiledevice3-helper lockdown start-tunnel --script-mode --udid id"),
+        "tunnel process matcher did not match bundled helper tunnel command"
     )
     try check(
         !ProcessMatcher.isTunnelCommand("/repo/.venv/bin/pymobiledevice3 lockdown stop-tunnel --script-mode --udid id"),
@@ -231,6 +241,20 @@ func runChecks() throws {
     try checkThrows("timeout did not throw") {
         _ = try runner.run(["/bin/sh", "-c", "sleep 2"], timeout: 0.1)
     }
+    let ignoredTerminationStart = Date()
+    try checkThrows("ignored termination timeout did not throw") {
+        _ = try runner.run(["/bin/sh", "-c", "trap '' TERM; sleep 3"], timeout: 0.1)
+    }
+    try check(
+        Date().timeIntervalSince(ignoredTerminationStart) < 2,
+        "timeout should not wait forever when a process ignores SIGTERM"
+    )
+    let largeOutput = try runner.run([
+        "/usr/bin/perl",
+        "-e",
+        "print 'x' x 2000000; print STDERR 'y' x 2000000;"
+    ], timeout: 5)
+    try check(largeOutput.count == 2_000_000, "process runner did not drain large stdout")
 }
 
 do {

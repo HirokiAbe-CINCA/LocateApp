@@ -29,17 +29,17 @@ struct LocationPreset: Identifiable {
     static let defaults: [LocationPreset] = [
         LocationPreset(
             id: "tokyo-station",
-            title: "Tokyo Station",
+            title: "東京駅",
             coordinate: CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125)
         ),
         LocationPreset(
             id: "shibuya",
-            title: "Shibuya Crossing",
+            title: "渋谷スクランブル交差点",
             coordinate: CLLocationCoordinate2D(latitude: 35.659494, longitude: 139.70055)
         ),
         LocationPreset(
             id: "haneda",
-            title: "Haneda Airport",
+            title: "羽田空港",
             coordinate: CLLocationCoordinate2D(latitude: 35.549393, longitude: 139.779839)
         ),
         LocationPreset(

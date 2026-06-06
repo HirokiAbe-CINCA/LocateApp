@@ -34,4 +34,4 @@ jobs:
         run: swift build
 
       - name: Script syntax
-        run: bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh
+        run: bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh scripts/verify_release_artifacts.sh

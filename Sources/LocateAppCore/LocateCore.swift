@@ -84,15 +84,25 @@ public struct RSDEndpoint: Equatable, Sendable {
     }
 
     public static func parse(_ output: String) throws -> RSDEndpoint {
-        let parts = output
-            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
-            .map(String.init)
+        let endpointParts = output
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .reversed()
+            .compactMap { line -> [String]? in
+                let parts = line
+                    .split(whereSeparator: { $0 == " " || $0 == "\t" })
+                    .map(String.init)
+                guard parts.count == 2, Int(parts[1]) != nil else {
+                    return nil
+                }
+                return parts
+            }
+            .first
 
-        guard parts.count == 2, Int(parts[1]) != nil else {
+        guard let endpointParts else {
             throw LocateError.invalidRSDOutput(output.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
-        return RSDEndpoint(host: parts[0], port: parts[1])
+        return RSDEndpoint(host: endpointParts[0], port: endpointParts[1])
     }
 }
 

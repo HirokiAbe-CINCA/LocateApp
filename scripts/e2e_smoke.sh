@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/dist/LocateApp.app"
+APP="${SMOKE_APP:-$ROOT/dist/LocateApp.app}"
 
 cd "$ROOT"
 
-if [[ ! -d "$APP" ]]; then
+if [[ -z "${SMOKE_APP:-}" ]]; then
   ./scripts/build_app_bundle.sh >/dev/null
 fi
 
@@ -33,7 +33,14 @@ tell application "System Events"
       if exists window 1 then exit repeat
       delay 0.25
     end repeat
+    delay 1
 
+    if not (exists static text "1. 場所を選ぶ" of scroll area 1 of group 1 of window 1) then
+      error "Expected the place selection step to be visible"
+    end if
+    if not (exists static text "2. iPhoneに固定" of scroll area 1 of group 1 of window 1) then
+      error "Expected the iPhone fixing step to be visible"
+    end if
     tell window 1
       set panel to scroll area 1 of group 1
       click button 1 of group 4 of panel

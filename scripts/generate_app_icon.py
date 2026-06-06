@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 
 ICONSET_SPECS = [
@@ -30,9 +30,9 @@ def lerp(start: int, end: int, t: float) -> int:
 
 
 def gradient_background(size: int) -> Image.Image:
-    top = (9, 19, 31)
-    middle = (13, 67, 76)
-    bottom = (16, 24, 39)
+    top = (9, 18, 28)
+    middle = (10, 44, 53)
+    bottom = (8, 14, 24)
     image = Image.new("RGBA", (size, size))
     pixels = image.load()
     for y in range(size):
@@ -44,7 +44,7 @@ def gradient_background(size: int) -> Image.Image:
             local = (t - 0.58) / 0.42
             color = tuple(lerp(middle[i], bottom[i], local) for i in range(3))
         for x in range(size):
-            vignette = 1.0 - 0.22 * math.hypot((x / size) - 0.5, (y / size) - 0.5)
+            vignette = 1.0 - 0.16 * math.hypot((x / size) - 0.5, (y / size) - 0.5)
             pixels[x, y] = tuple(max(0, min(255, round(channel * vignette))) for channel in color) + (255,)
     return image
 
@@ -77,82 +77,53 @@ def draw_icon(size: int = 1024) -> Image.Image:
     overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Subtle geometric field.
-    grid_color = (125, 232, 227, 30)
-    for offset in range(-1024, 2048, 128):
-        draw.line(
-            [(offset * scale, 0), ((offset + 760) * scale, size)],
-            fill=grid_color,
-            width=max(1, round(2 * scale)),
-        )
-        draw.line(
-            [((1024 - offset) * scale, 0), ((264 - offset) * scale, size)],
-            fill=(68, 137, 255, 22),
-            width=max(1, round(2 * scale)),
-        )
+    center = (512 * scale, 498 * scale)
+    shadow = polygon(center[0] + 12 * scale, center[1] + 22 * scale, 286 * scale, 4, 0)
+    draw.polygon(shadow, fill=(0, 0, 0, 86))
 
-    center = (512 * scale, 500 * scale)
-    halo = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    halo_draw = ImageDraw.Draw(halo)
-    halo_draw.ellipse(
-        [
-            center[0] - 310 * scale,
-            center[1] - 310 * scale,
-            center[0] + 310 * scale,
-            center[1] + 310 * scale,
-        ],
-        fill=(36, 210, 205, 44),
-    )
-    halo = halo.filter(ImageFilter.GaussianBlur(radius=34 * scale))
-    image = Image.alpha_composite(image, halo)
-
-    diamond_shadow = polygon(center[0] + 10 * scale, center[1] + 18 * scale, 270 * scale, 4, math.pi / 4)
-    draw.polygon(diamond_shadow, fill=(0, 0, 0, 92))
-    diamond = polygon(center[0], center[1], 270 * scale, 4, math.pi / 4)
-    draw.polygon(diamond, fill=(12, 31, 47, 236), outline=(137, 245, 237, 190))
-
-    inner = polygon(center[0], center[1], 184 * scale, 4, math.pi / 4)
-    draw.polygon(inner, fill=(16, 90, 105, 238), outline=(91, 188, 255, 210))
-
-    route = [
-        (352 * scale, 540 * scale),
-        (430 * scale, 438 * scale),
-        (522 * scale, 563 * scale),
-        (672 * scale, 366 * scale),
-    ]
-    draw.line(route, fill=(224, 253, 252, 232), width=max(4, round(22 * scale)), joint="curve")
-    draw.line(route, fill=(74, 222, 216, 255), width=max(2, round(9 * scale)), joint="curve")
+    outer = polygon(center[0], center[1], 288 * scale, 4, 0)
+    inner = polygon(center[0], center[1], 190 * scale, 4, 0)
+    draw.polygon(outer, fill=(79, 232, 224, 255))
+    draw.polygon(inner, fill=(9, 30, 42, 255))
 
     draw.ellipse(
         [
-            center[0] - 92 * scale,
-            center[1] - 92 * scale,
-            center[0] + 92 * scale,
+            center[0] - 78 * scale,
+            center[1] - 78 * scale,
+            center[0] + 78 * scale,
+            center[1] + 78 * scale,
+        ],
+        outline=(238, 255, 254, 255),
+        width=max(4, round(18 * scale)),
+    )
+    draw.ellipse(
+        [
+            center[0] - 24 * scale,
+            center[1] - 24 * scale,
+            center[0] + 24 * scale,
+            center[1] + 24 * scale,
+        ],
+        fill=(238, 255, 254, 255),
+    )
+
+    stem_width = 28 * scale
+    draw.rounded_rectangle(
+        [
+            center[0] - stem_width / 2,
             center[1] + 92 * scale,
+            center[0] + stem_width / 2,
+            center[1] + 278 * scale,
         ],
-        outline=(236, 254, 255, 245),
-        width=max(3, round(16 * scale)),
+        radius=round(14 * scale),
+        fill=(79, 232, 224, 255),
     )
-    draw.ellipse(
+    draw.polygon(
         [
-            center[0] - 34 * scale,
-            center[1] - 34 * scale,
-            center[0] + 34 * scale,
-            center[1] + 34 * scale,
+            (center[0], 804 * scale),
+            (center[0] - 58 * scale, 704 * scale),
+            (center[0] + 58 * scale, 704 * scale),
         ],
-        fill=(236, 254, 255, 255),
-    )
-
-    pin_tip = [
-        (center[0], 802 * scale),
-        (442 * scale, 620 * scale),
-        (582 * scale, 620 * scale),
-    ]
-    draw.polygon(pin_tip, fill=(74, 222, 216, 248))
-    draw.line(
-        [(center[0], 642 * scale), (center[0], 802 * scale)],
-        fill=(236, 254, 255, 190),
-        width=max(2, round(7 * scale)),
+        fill=(238, 255, 254, 255),
     )
 
     image = Image.alpha_composite(image, overlay)
