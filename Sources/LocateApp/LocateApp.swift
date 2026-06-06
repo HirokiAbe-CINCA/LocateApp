@@ -10,6 +10,7 @@ struct LocateAppMain: App {
                 .environmentObject(model)
                 .frame(minWidth: 980, minHeight: 640)
                 .onAppear {
+                    model.startLocationContinuityMonitoring()
                     model.restorePreviousSession()
                     model.refreshDevices()
                     model.checkForUpdates()

@@ -354,6 +354,14 @@ public actor LocationSessionController {
         return ProcessMatcher.isTunnelCommand(commandLine)
     }
 
+    public func isSetProcessRunning() -> Bool {
+        guard let pid = try? readStoredPID(commands.files.setPID),
+              let commandLine = processCommandLine(pid: pid) else {
+            return false
+        }
+        return ProcessMatcher.isSimulatedLocationSetCommand(commandLine)
+    }
+
     private func verifySetProcessStarted() throws {
         let pid = try readStoredPID(commands.files.setPID)
         for _ in 0..<10 {
