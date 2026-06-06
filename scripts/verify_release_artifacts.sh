@@ -14,6 +14,7 @@ ARCHIVE_BASE="LocateApp-$VERSION-mac-arm64"
 ZIP="$RELEASE_DIR/$ARCHIVE_BASE.zip"
 DMG="$RELEASE_DIR/$ARCHIVE_BASE.dmg"
 SUMS="$RELEASE_DIR/SHA256SUMS.txt"
+EXPECT_NOTARIZED="${EXPECT_NOTARIZED:-0}"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -32,6 +33,10 @@ verify_app() {
   test -x "$helper"
   test -f "$icon"
   codesign --verify --deep --strict --verbose=2 "$app"
+  if [[ "$EXPECT_NOTARIZED" == "1" ]]; then
+    xcrun stapler validate "$app"
+    spctl --assess --type execute --verbose=2 "$app"
+  fi
 
   version="$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")"
   if [[ "$version" != "$VERSION" ]]; then
@@ -74,5 +79,13 @@ if [[ -z "$MOUNT_DIR" ]]; then
   exit 1
 fi
 verify_app "$MOUNT_DIR/LocateApp.app"
+if find "$MOUNT_DIR" -type f \( -name 'AuthKey_*.p8' -o -name 'notary-*.json' -o -name '*-app-notary.zip' \) | grep -q .; then
+  echo "DMG contains signing or notarization work files" >&2
+  exit 1
+fi
+if [[ "$EXPECT_NOTARIZED" == "1" ]]; then
+  xcrun stapler validate "$DMG"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+fi
 
 echo "LocateApp release artifacts verified"

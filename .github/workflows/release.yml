@@ -33,15 +33,55 @@ jobs:
           .venv/bin/python -m pytest
           swift run LocateAppCoreChecks
           swift build
-          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh scripts/verify_release_artifacts.sh
+          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/import_apple_certificate.sh scripts/package_release.sh scripts/verify_release_artifacts.sh
+
+      - name: Prepare Apple signing certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          ./scripts/import_apple_certificate.sh
 
       - name: Package release
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
+          if [[ -n "${APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64:-}" &&
+                -n "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" &&
+                -n "${APPLE_KEYCHAIN_PASSWORD:-}" &&
+                -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            export SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY"
+          fi
+          NOTARIZE=auto VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
 
       - name: Verify release artifacts
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
+          if [[ -n "${APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64:-}" &&
+                -n "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" &&
+                -n "${APPLE_KEYCHAIN_PASSWORD:-}" &&
+                -n "${APPLE_SIGNING_IDENTITY:-}" &&
+                -n "${APPLE_NOTARY_KEY_P8_BASE64:-}" &&
+                -n "${APPLE_NOTARY_KEY_ID:-}" &&
+                -n "${APPLE_NOTARY_ISSUER_ID:-}" ]]; then
+            EXPECT_NOTARIZED=1 VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
+          else
+            VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
+          fi
 
       - name: Publish GitHub Release
         env:

@@ -3,9 +3,8 @@
 ## Product View
 
 - Search a destination by name, choose from results, and move the map pin there.
-- Show selected location, active fixed location, tunnel state, and state/log folder separately.
+- Show selected destination, current moved location, iPhone connection state, and state/log folder separately.
 - Offer direct coordinate entry for users who already know latitude/longitude.
-- Keep a small local preset list for common test places.
 - Make reset a reliable safety action even after relaunch, cable reconnect, or stale tunnel state.
 - Make every destructive or privileged action explain what will happen before the macOS prompt appears.
 
@@ -14,7 +13,7 @@
 - The first screen should be the usable tool: map on the left, compact control surface on the right.
 - Primary action should be singular and obvious: `Move iPhone Here`.
 - Search should sit above the map controls, not hidden in settings.
-- The UI should distinguish `Selected` from `Fixed` to avoid accidental location changes.
+- The UI should distinguish selected destination from current moved location to avoid accidental changes.
 - Busy states should say what the app is waiting for: device, administrator prompt, tunnel, DDI, or set process.
 - Raw technical logs should be available but not dominate the panel.
 

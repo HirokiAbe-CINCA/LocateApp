@@ -17,39 +17,6 @@ struct LocationSearchResult: Identifiable, Equatable {
     }
 }
 
-struct LocationPreset: Identifiable {
-    let id: String
-    let title: String
-    let coordinate: CLLocationCoordinate2D
-
-    var coordinateText: String {
-        String(format: "%.6f, %.6f", coordinate.latitude, coordinate.longitude)
-    }
-
-    static let defaults: [LocationPreset] = [
-        LocationPreset(
-            id: "tokyo-station",
-            title: "東京駅",
-            coordinate: CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125)
-        ),
-        LocationPreset(
-            id: "shibuya",
-            title: "渋谷スクランブル交差点",
-            coordinate: CLLocationCoordinate2D(latitude: 35.659494, longitude: 139.70055)
-        ),
-        LocationPreset(
-            id: "haneda",
-            title: "羽田空港",
-            coordinate: CLLocationCoordinate2D(latitude: 35.549393, longitude: 139.779839)
-        ),
-        LocationPreset(
-            id: "apple-park",
-            title: "Apple Park",
-            coordinate: CLLocationCoordinate2D(latitude: 37.3349, longitude: -122.00902)
-        )
-    ]
-}
-
 struct LocationSearchService: Sendable {
     func search(query: String, near coordinate: CLLocationCoordinate2D) async throws -> [LocationSearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)

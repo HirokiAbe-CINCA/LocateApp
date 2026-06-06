@@ -4,12 +4,20 @@ import CoreLocation
 import Foundation
 import LocateAppCore
 
+enum ConnectionStateKind {
+    case unavailable
+    case detected
+    case preparing
+    case ready
+    case failed
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var devices: [DeviceInfo] = []
     @Published var selectedDeviceID: String?
     @Published var selectedMapCoordinate = CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125)
-    @Published var status: String = "場所を選んで「この場所に固定」を押してください。"
+    @Published var status: String = "移動先を選んで「この場所に移動」を押してください。"
     @Published var isBusy = false
     @Published var isSearching = false
     @Published var rsdEndpoint: RSDEndpoint?
@@ -21,6 +29,8 @@ final class AppModel: ObservableObject {
     @Published var selectedLocationName: String?
     @Published var activeLocationName: String?
     private var rsdDeviceID: String?
+    @Published private var isPreparingConnection = false
+    @Published private var connectionFailureMessage: String?
 
     private let paths: LocatePaths
     private let session: LocationSessionController
@@ -31,6 +41,55 @@ final class AppModel: ObservableObject {
         devices.first { $0.identifier == selectedDeviceID } ?? devices.first
     }
 
+    var connectionStateKind: ConnectionStateKind {
+        if connectionFailureMessage != nil {
+            return .failed
+        }
+        if isPreparingConnection {
+            return .preparing
+        }
+        guard selectedDevice != nil else {
+            return .unavailable
+        }
+        if rsdEndpoint != nil {
+            return .ready
+        }
+        return .detected
+    }
+
+    var connectionStateTitle: String {
+        switch connectionStateKind {
+        case .failed:
+            return "接続失敗"
+        case .preparing:
+            return "通信準備中"
+        case .unavailable:
+            return "iPhone未接続"
+        case .ready:
+            return "通信準備完了"
+        case .detected:
+            return "iPhone検出済み"
+        }
+    }
+
+    var connectionStateDetail: String {
+        if let connectionFailureMessage {
+            return connectionFailureMessage
+        }
+        if isPreparingConnection {
+            return "管理者認証が表示されたら承認してください。"
+        }
+        guard let selectedDevice else {
+            return "USB接続、ロック解除、信頼設定を確認してください。"
+        }
+
+        var detail = "\(selectedDevice.name) / iOS \(selectedDevice.productVersion)"
+        if let rsdEndpoint {
+            detail += " / \(rsdEndpoint.host) \(rsdEndpoint.port)"
+        }
+        return detail
+    }
+
     var selectedCoordinateText: String {
         let coordinateText = String(format: "%.6f, %.6f", selectedMapCoordinate.latitude, selectedMapCoordinate.longitude)
         if let selectedLocationName {
@@ -39,15 +98,19 @@ final class AppModel: ObservableObject {
         return coordinateText
     }
 
-    var activeCoordinateText: String {
+    var activeLocationTitle: String {
+        guard activeCoordinate != nil else {
+            return "未移動"
+        }
+        return activeLocationName ?? "名称なし"
+    }
+
+    var activeCoordinateDetail: String {
         guard let activeCoordinate else {
-            return "未固定"
+            return "iPhoneは通常の位置情報を使っています。"
         }
-        let prefix = activeLocationMayRemain ? "前回の固定が残っている可能性: " : ""
-        if let activeLocationName {
-            return "\(prefix)\(activeLocationName) (\(activeCoordinate.latitudeText), \(activeCoordinate.longitudeText))"
-        }
-        return "\(prefix)\(activeCoordinate.latitudeText), \(activeCoordinate.longitudeText)"
+        let coordinateText = "\(activeCoordinate.latitudeText), \(activeCoordinate.longitudeText)"
+        return activeLocationMayRemain ? "前回の移動先の可能性: \(coordinateText)" : coordinateText
     }
 
     var stateDirectoryPath: String {
@@ -57,8 +120,6 @@ final class AppModel: ObservableObject {
     var stateDirectoryURL: URL {
         paths.stateDirectory
     }
-
-    let presets = LocationPreset.defaults
 
     init() {
         do {
@@ -76,12 +137,18 @@ final class AppModel: ObservableObject {
 
     func refreshDevices() {
         runBusy("iPhoneを確認しています...") {
-            try await self.refreshDeviceList()
+            do {
+                try await self.refreshDeviceList()
+            } catch {
+                self.connectionFailureMessage = self.userFacingMessage(for: error)
+                throw error
+            }
         }
     }
 
     func selectDevice(_ identifier: String) {
         selectedDeviceID = identifier
+        connectionFailureMessage = nil
         if rsdDeviceID != identifier {
             rsdEndpoint = nil
             rsdDeviceID = nil
@@ -137,24 +204,27 @@ final class AppModel: ObservableObject {
         searchQuery = result.title
         selectedLocationName = result.title
         searchResults = []
-        status = "「\(result.title)」を選びました。「この場所に固定」を押してください。"
-    }
-
-    func usePreset(_ preset: LocationPreset) {
-        selectCoordinate(preset.coordinate)
-        searchQuery = preset.title
-        selectedLocationName = preset.title
-        searchResults = []
-        status = "「\(preset.title)」を選びました。「この場所に固定」を押してください。"
+        status = "「\(result.title)」を選びました。「この場所に移動」を押してください。"
     }
 
     func applyCoordinateInput() {
         do {
             let coordinate = try Coordinate.parsePair(coordinateInputText)
             selectCoordinate(CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude))
-            status = "\(coordinate.latitudeText), \(coordinate.longitudeText) を選びました。「この場所に固定」を押してください。"
+            status = "\(coordinate.latitudeText), \(coordinate.longitudeText) を選びました。「この場所に移動」を押してください。"
         } catch {
             status = userFacingMessage(for: error)
+        }
+    }
+
+    func previewCoordinateInput() {
+        guard let coordinate = try? Coordinate.parsePair(coordinateInputText) else {
+            return
+        }
+        if abs(selectedMapCoordinate.latitude - coordinate.latitude) > 0.000_001 ||
+            abs(selectedMapCoordinate.longitude - coordinate.longitude) > 0.000_001 {
+            selectedMapCoordinate = CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            selectedLocationName = nil
         }
     }
 
@@ -175,7 +245,7 @@ final class AppModel: ObservableObject {
             if let coordinate = try? await session.readActiveCoordinate() {
                 activeCoordinate = coordinate
                 activeLocationMayRemain = true
-                status = "前回の固定位置が残っている可能性があります。解除する場合は「固定を解除」を押してください。"
+                status = "前回の移動先が残っている可能性があります。戻す場合は「移動を解除」を押してください。"
             }
         }
     }
@@ -183,12 +253,12 @@ final class AppModel: ObservableObject {
     func startTunnel() {
         runBusy("接続を準備しています...") {
             _ = try await self.ensureTunnel(forceRestart: true)
-            self.status = "接続準備ができました。「この場所に固定」を押してください。"
+            self.status = "接続準備ができました。「この場所に移動」を押してください。"
         }
     }
 
     func moveToSelectedLocation() {
-        runBusy("iPhoneの位置を固定しています...") {
+        runBusy("iPhoneの場所を移動しています...") {
             do {
                 let coordinate = try Coordinate.parsePair(self.coordinateInputText)
                 if abs(self.selectedMapCoordinate.latitude - coordinate.latitude) > 0.000_001 ||
@@ -205,7 +275,7 @@ final class AppModel: ObservableObject {
                 self.activeCoordinate = coordinate
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
-                self.status = "固定しました。iPhoneを再起動するか「固定を解除」するまで、この位置が使われます。"
+                self.status = "移動しました。iPhoneを再起動するか「移動を解除」するまで、この場所が使われます。"
             } catch {
                 self.rsdEndpoint = nil
                 self.rsdDeviceID = nil
@@ -215,7 +285,7 @@ final class AppModel: ObservableObject {
     }
 
     func resetLocation() {
-        runBusy("固定を解除しています...") {
+        runBusy("移動を解除しています...") {
             try await self.session.stopSetProcess()
 
             do {
@@ -227,10 +297,10 @@ final class AppModel: ObservableObject {
                 self.activeCoordinate = nil
                 self.activeLocationName = nil
                 self.activeLocationMayRemain = false
-                self.status = "固定を解除しました。iPhoneは通常の位置情報に戻ります。"
+                self.status = "移動を解除しました。iPhoneは通常の位置情報に戻ります。"
             } catch {
                 self.activeLocationMayRemain = self.activeCoordinate != nil
-                self.status = "Mac側の固定処理は止めましたが、iPhoneへの解除コマンドが届きませんでした: \(self.userFacingMessage(for: error))"
+                self.status = "Mac側の移動処理は止めましたが、iPhoneへの解除コマンドが届きませんでした: \(self.userFacingMessage(for: error))"
             }
         }
     }
@@ -242,6 +312,7 @@ final class AppModel: ObservableObject {
         }
         let devices = try DeviceInfo.parseList(output)
         self.devices = devices
+        connectionFailureMessage = nil
         if selectedDeviceID == nil || !devices.contains(where: { $0.identifier == selectedDeviceID }) {
             selectedDeviceID = devices.first?.identifier
         }
@@ -249,7 +320,7 @@ final class AppModel: ObservableObject {
             rsdEndpoint = nil
             self.rsdDeviceID = nil
         }
-        status = devices.isEmpty ? "iPhoneが見つかりません。ケーブル接続、ロック解除、信頼設定を確認してください。" : "\(devices.count)台のiPhoneを検出しました。"
+        status = devices.isEmpty ? "iPhoneが見つかりません。ケーブル接続、ロック解除、信頼設定を確認してください。" : "\(devices.count)台のiPhoneを検出しました。移動先を選んでください。"
     }
 
     private func ensureSelectedDevice() async throws -> DeviceInfo {
@@ -287,23 +358,33 @@ final class AppModel: ObservableObject {
             rsdDeviceID = nil
         }
 
-        status = "管理者認証が表示されたら承認してください。iPhone接続の準備に使います。"
-        try await session.startTunnel(device: selectedDevice)
-        status = "iPhone接続の準備完了を待っています..."
+        isPreparingConnection = true
+        connectionFailureMessage = nil
+        do {
+            status = "管理者認証が表示されたら承認してください。iPhone接続の準備に使います。"
+            try await session.startTunnel(device: selectedDevice)
+            status = "iPhone接続の準備完了を待っています..."
 
-        for _ in 0..<30 {
-            if let endpoint = try? await session.readTunnelEndpoint() {
-                rsdEndpoint = endpoint
-                rsdDeviceID = selectedDevice.identifier
-                return endpoint
+            for _ in 0..<30 {
+                if let endpoint = try? await session.readTunnelEndpoint() {
+                    rsdEndpoint = endpoint
+                    rsdDeviceID = selectedDevice.identifier
+                    isPreparingConnection = false
+                    connectionFailureMessage = nil
+                    return endpoint
+                }
+                try await Task.sleep(nanoseconds: 500_000_000)
             }
-            try await Task.sleep(nanoseconds: 500_000_000)
-        }
 
-        rsdEndpoint = nil
-        rsdDeviceID = nil
-        try? await session.stopTunnel()
-        throw LocateError.invalidRSDOutput("15秒以内にiPhone接続を準備できませんでした。iPhoneの接続・ロック解除・管理者認証の承認を確認して、もう一度試してください。急いで解除したい場合はiPhoneを再起動してください。")
+            rsdEndpoint = nil
+            rsdDeviceID = nil
+            try? await session.stopTunnel()
+            throw LocateError.invalidRSDOutput("15秒以内にiPhone接続を準備できませんでした。iPhoneの接続・ロック解除・管理者認証の承認を確認して、もう一度試してください。急いで解除したい場合はiPhoneを再起動してください。")
+        } catch {
+            isPreparingConnection = false
+            connectionFailureMessage = userFacingMessage(for: error)
+            throw error
+        }
     }
 
     private func runBusy(_ busyStatus: String, operation: @escaping () async throws -> Void) {
@@ -333,7 +414,7 @@ final class AppModel: ObservableObject {
         }
         if message.localizedCaseInsensitiveContains("No route to host") ||
             message.localizedCaseInsensitiveContains("Connection refused") {
-            return "iPhoneに接続できません。ケーブル接続とロック解除を確認してください。iPhoneを再起動しても固定は解除されます。"
+            return "iPhoneに接続できません。ケーブル接続とロック解除を確認してください。iPhoneを再起動しても移動状態は解除されます。"
         }
         if message.localizedCaseInsensitiveContains("pymobiledevice3 was not found") {
             return "補助ツールが見つかりません。配布版を使うか、READMEのセットアップを実行してから開き直してください。"

@@ -11,7 +11,7 @@ Build a small macOS app that lets the user pick a location on a map and set the 
 3. Click a place on the map.
 4. Press "Move iPhone Here".
 5. The app starts or reuses an RSD tunnel, runs the DVT location simulation command, and keeps the simulation process alive.
-6. The iPhone stays fixed at that coordinate until the user presses "Reset Location", stops the helper processes, or restarts the iPhone.
+6. The iPhone keeps using that simulated coordinate until the user presses "Reset Location", stops the helper processes, or restarts the iPhone.
 
 ## Architecture
 
