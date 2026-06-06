@@ -42,32 +42,31 @@ BUNDLE_HELPER=1 CONFIGURATION=release ./scripts/build_app_bundle.sh
 In the app:
 
 1. Connect and unlock the iPhone.
-2. Click `Refresh`.
-3. Search for a place by name, choose a preset, enter `lat, lon`, or click a
-   point on the map.
-4. Click `Move iPhone Here`.
+2. Click `接続を確認`.
+3. Search for a place by name, enter `lat, lon`, or click a point on the map.
+4. Click `この場所に移動`.
 5. Approve the macOS administrator prompt when the RSD tunnel starts.
 
-`Move iPhone Here` detaches the location-setting process and writes PID/log
+`この場所に移動` detaches the location-setting process and writes PID/log
 files under `.locateapp/`. The simulated location is expected to remain active
-after closing the Mac app, until the iPhone is restarted or `Reset Location` is
+after closing the Mac app, until the iPhone is restarted or `移動を解除` is
 clicked in the app.
 
-`Reset Location` terminates the stored set-location process and sends the DVT
+`移動を解除` terminates the stored set-location process and sends the DVT
 clear-location command through a recovered tunnel when needed. If the iPhone is
 not reachable and the simulated location still appears active, restart the
 iPhone to force iOS to clear the simulated location.
 
-Use `Open Logs` to inspect `.locateapp/tunnel.out`, `.locateapp/tunnel.err`,
+Use `ログ` to inspect `.locateapp/tunnel.out`, `.locateapp/tunnel.err`,
 `.locateapp/set.out`, and `.locateapp/set.err` when the tunnel or location set
 command fails.
 
 ## After Relaunch, Sleep, or Reconnect
 
-1. Open the app and check `Fixed`.
-2. If it says `May still be active`, assume the iPhone may still be using the
-   simulated location.
-3. Use `Reset Location` with the iPhone connected and unlocked.
+1. Open the app and check `現在の移動先`.
+2. If it says `前回の移動先が残っている可能性`, assume the iPhone may still
+   be using the simulated location.
+3. Use `移動を解除` with the iPhone connected and unlocked.
 4. If reset cannot reach the iPhone, restart the iPhone. iOS restart is the
    authoritative fallback for clearing simulated location.
 
@@ -95,6 +94,11 @@ git push origin v0.1.0
 ```
 
 The Release workflow uploads the DMG, ZIP, and `SHA256SUMS.txt`.
+
+Developer ID signing and notarization are supported when Apple secrets are set
+in GitHub Actions. See `docs/notarization.md` for the required Apple account
+steps and secret names. Without those secrets, release builds remain ad-hoc
+signed.
 
 ## Cleanup
 
@@ -188,5 +192,5 @@ swift run LocateAppCoreChecks
 ./scripts/e2e_smoke.sh
 ```
 
-The E2E smoke test launches the local app and verifies the user-facing preset
-selection flow without changing a real iPhone location.
+The E2E smoke test launches the local app and verifies the user-facing
+connection and movement UI without changing a real iPhone location.

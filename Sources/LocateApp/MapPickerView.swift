@@ -34,14 +34,15 @@ struct MapPickerView: NSViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.centerMapIfNeeded(mapView)
         context.coordinator.updateAnnotation(on: mapView)
-        context.coordinator.updateFixedAnnotation(on: mapView)
+        context.coordinator.updateActiveAnnotation(on: mapView)
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: MapPickerView
         private let annotation = MKPointAnnotation()
-        private let fixedAnnotation = MKPointAnnotation()
+        private let activeAnnotation = MKPointAnnotation()
         private var renderedCoordinate: CLLocationCoordinate2D?
+        private var renderedActiveCoordinate: Coordinate?
 
         init(parent: MapPickerView) {
             self.parent = parent
@@ -77,43 +78,62 @@ struct MapPickerView: NSViewRepresentable {
 
         func updateAnnotation(on mapView: MKMapView) {
             annotation.coordinate = parent.coordinate
-            annotation.title = "選択中の場所"
+            annotation.title = "選択中の移動先"
             if !mapView.annotations.contains(where: { $0 === annotation }) {
                 mapView.addAnnotation(annotation)
             }
         }
 
-        func updateFixedAnnotation(on mapView: MKMapView) {
+        func updateActiveAnnotation(on mapView: MKMapView) {
             guard let activeCoordinate = parent.activeCoordinate else {
-                if mapView.annotations.contains(where: { $0 === fixedAnnotation }) {
-                    mapView.removeAnnotation(fixedAnnotation)
+                if mapView.annotations.contains(where: { $0 === activeAnnotation }) {
+                    mapView.removeAnnotation(activeAnnotation)
                 }
+                renderedActiveCoordinate = nil
                 return
             }
 
-            fixedAnnotation.coordinate = CLLocationCoordinate2D(
+            centerMapOnActiveCoordinateIfNeeded(mapView, activeCoordinate: activeCoordinate)
+            activeAnnotation.coordinate = CLLocationCoordinate2D(
                 latitude: activeCoordinate.latitude,
                 longitude: activeCoordinate.longitude
             )
-            fixedAnnotation.title = "固定中の場所"
-            if !mapView.annotations.contains(where: { $0 === fixedAnnotation }) {
-                mapView.addAnnotation(fixedAnnotation)
+            activeAnnotation.title = "現在の移動先"
+            if !mapView.annotations.contains(where: { $0 === activeAnnotation }) {
+                mapView.addAnnotation(activeAnnotation)
             }
         }
 
+        func centerMapOnActiveCoordinateIfNeeded(_ mapView: MKMapView, activeCoordinate: Coordinate) {
+            if renderedActiveCoordinate == activeCoordinate {
+                return
+            }
+
+            renderedActiveCoordinate = activeCoordinate
+            let coordinate = CLLocationCoordinate2D(
+                latitude: activeCoordinate.latitude,
+                longitude: activeCoordinate.longitude
+            )
+            let region = MKCoordinateRegion(
+                center: coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
+            )
+            mapView.setRegion(region, animated: true)
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            guard annotation === self.annotation || annotation === fixedAnnotation else {
+            guard annotation === self.annotation || annotation === activeAnnotation else {
                 return nil
             }
 
-            let isFixed = annotation === fixedAnnotation
-            let identifier = isFixed ? "fixed-location-pin" : "selected-location-pin"
+            let isActive = annotation === activeAnnotation
+            let identifier = isActive ? "active-location-pin" : "selected-location-pin"
             let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
                 ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             view.annotation = annotation
             view.canShowCallout = true
-            view.markerTintColor = isFixed ? .systemOrange : .systemBlue
-            view.glyphText = isFixed ? "固" : "選"
+            view.markerTintColor = isActive ? .systemOrange : .systemBlue
+            view.glyphText = isActive ? "移" : "選"
             return view
         }
     }

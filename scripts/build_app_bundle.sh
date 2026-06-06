@@ -6,6 +6,10 @@ APP="$ROOT/dist/LocateApp.app"
 EXECUTABLE="$APP/Contents/MacOS/LocateApp"
 CONFIGURATION="${CONFIGURATION:-debug}"
 BUNDLE_HELPER="${BUNDLE_HELPER:-0}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-${APPLE_SIGNING_IDENTITY:--}}"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+fi
 if [[ -z "${APP_VERSION:-}" ]]; then
   if VERSION_TAG="$(git describe --tags --abbrev=0 2>/dev/null)"; then
     APP_VERSION="${VERSION_TAG#v}"
@@ -14,6 +18,37 @@ if [[ -z "${APP_VERSION:-}" ]]; then
   fi
 fi
 APP_BUILD="${APP_BUILD:-${GITHUB_RUN_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}}"
+
+is_developer_id_signing() {
+  [[ "$SIGNING_IDENTITY" != "-" ]]
+}
+
+sign_target() {
+  local target="$1"
+  local args=(--force --sign "$SIGNING_IDENTITY")
+  if is_developer_id_signing; then
+    args+=(--timestamp --options runtime)
+  fi
+  codesign "${args[@]}" "$target"
+}
+
+is_macho_file() {
+  local path="$1"
+  file "$path" | grep -Eq 'Mach-O'
+}
+
+sign_nested_macho_files() {
+  local resources="$APP/Contents/Resources"
+  if [[ ! -d "$resources" ]]; then
+    return
+  fi
+
+  while IFS= read -r -d '' path; do
+    if is_macho_file "$path"; then
+      sign_target "$path"
+    fi
+  done < <(find "$resources" -type f \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0)
+}
 
 cd "$ROOT"
 
@@ -103,7 +138,10 @@ perl -0pi -e "s/__APP_VERSION__/$APP_VERSION/g" "$APP/Contents/Info.plist"
 perl -0pi -e "s/__APP_BUILD__/$APP_BUILD/g" "$APP/Contents/Info.plist"
 
 plutil -lint "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP"
+if is_developer_id_signing; then
+  sign_nested_macho_files
+fi
+sign_target "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo "$APP"
