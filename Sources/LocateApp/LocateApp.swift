@@ -12,6 +12,7 @@ struct LocateAppMain: App {
                 .onAppear {
                     model.restorePreviousSession()
                     model.refreshDevices()
+                    model.checkForUpdates()
                 }
         }
         .windowStyle(.titleBar)

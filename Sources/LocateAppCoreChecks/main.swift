@@ -77,6 +77,44 @@ func runChecks() throws {
     try checkThrows("non-finite longitude did not throw") {
         _ = try Coordinate(latitude: 35.681236, longitude: .infinity)
     }
+
+    let releaseJSON = """
+    {
+      "tag_name": "v0.1.5",
+      "html_url": "https://github.com/HirokiAbe-CINCA/LocateApp/releases/tag/v0.1.5",
+      "assets": [
+        {
+          "name": "LocateApp-0.1.5-mac-arm64.dmg",
+          "browser_download_url": "https://github.com/HirokiAbe-CINCA/LocateApp/releases/download/v0.1.5/LocateApp-0.1.5-mac-arm64.dmg"
+        },
+        {
+          "name": "SHA256SUMS.txt",
+          "browser_download_url": "https://github.com/HirokiAbe-CINCA/LocateApp/releases/download/v0.1.5/SHA256SUMS.txt"
+        }
+      ]
+    }
+    """
+    let availableUpdate = try ReleaseUpdate.parse(
+        releaseJSON,
+        currentVersion: "0.1.4"
+    )
+    try check(availableUpdate?.version == "0.1.5", "release version did not parse")
+    try check(
+        availableUpdate?.downloadURL.absoluteString.hasSuffix("LocateApp-0.1.5-mac-arm64.dmg") == true,
+        "release update should prefer the DMG asset"
+    )
+    let noUpdate = try ReleaseUpdate.parse(releaseJSON, currentVersion: "0.1.5")
+    try check(noUpdate == nil, "matching release should not be treated as an update")
+    try checkThrows("invalid release response did not throw") {
+        _ = try ReleaseUpdate.parse(#"{"tag_name":"v0.1.5"}"#, currentVersion: "0.1.4")
+    }
+    try checkThrows("pre-release version should not be coerced to zeroes") {
+        _ = try ReleaseUpdate.parse(
+            releaseJSON.replacingOccurrences(of: #""tag_name": "v0.1.5""#, with: #""tag_name": "v0.1.5-rc.1""#),
+            currentVersion: "0.1.4"
+        )
+    }
+
     let developerModeOn = try DeveloperMode.isEnabled("true\n")
     let developerModeOff = try DeveloperMode.isEnabled("false\n")
     try check(developerModeOn, "Developer Mode true did not parse")

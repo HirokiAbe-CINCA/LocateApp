@@ -8,9 +8,16 @@ struct DevicePanel: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("LocateApp")
-                        .font(.title2.weight(.semibold))
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("LocateApp")
+                            .font(.title2.weight(.semibold))
+                        Spacer()
+                        Text("v\(model.currentVersionText)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
 
+                    updateBanner
                     connectionSection
                     destinationSection
                 }
@@ -26,6 +33,22 @@ struct DevicePanel: View {
                     .lineLimit(5)
                     .textSelection(.enabled)
 
+                HStack {
+                    Button {
+                        model.openStateDirectory()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                            Text("診断情報")
+                        }
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel("診断情報を開く")
+                    .help("接続に失敗したときの詳細情報を開きます。")
+
+                    Spacer()
+                }
+
                 Text(model.stateDirectoryPath)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
@@ -36,6 +59,38 @@ struct DevicePanel: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .background(.bar)
+        }
+    }
+
+    @ViewBuilder
+    private var updateBanner: some View {
+        if let availableUpdate = model.availableUpdate {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("アップデートがあります")
+                        .font(.headline)
+                    Text("v\(availableUpdate.version)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    model.openAvailableUpdate()
+                } label: {
+                    Label("アップデート", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel("アップデートをダウンロード")
+            }
+            .padding(12)
+            .background(.blue.opacity(0.11), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -79,21 +134,6 @@ struct DevicePanel: View {
                     }
                     .disabled(model.isBusy)
                     .accessibilityLabel("iPhone接続を確認")
-
-                    Button {
-                        model.startTunnel()
-                    } label: {
-                        Label("通信を準備", systemImage: "cable.connector")
-                    }
-                    .disabled(model.isBusy || model.selectedDevice == nil)
-                    .accessibilityLabel("iPhone通信を準備")
-
-                    Button {
-                        model.openStateDirectory()
-                    } label: {
-                        Label("ログ", systemImage: "doc.text.magnifyingglass")
-                    }
-                    .accessibilityLabel("ログを開く")
                 }
             }
             .padding(4)

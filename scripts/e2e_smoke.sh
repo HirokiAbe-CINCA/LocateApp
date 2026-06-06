@@ -72,14 +72,16 @@ tell application "System Events"
     my assertNotContains(visibleText, "固定")
     my assertNotContains(visibleText, "反映")
     my assertNotContains(visibleText, "よく使う場所")
+    my assertNotContains(visibleText, "通信を準備")
+    my assertNotContains(visibleText, "ログ")
 
     tell window 1
       set panel to scroll area 1 of group 1
       if (count of groups of panel) is not 2 then
         error "Expected separate iPhone connection and destination groups"
       end if
-      if (count of buttons of group 1 of panel) is not 3 then
-        error "Expected connection actions to stay grouped"
+      if (count of buttons of group 1 of panel) is not 1 then
+        error "Expected connection section to expose only refresh as the primary action"
       end if
       if (count of text fields of group 2 of panel) is not 2 then
         error "Expected search and coordinate fields in destination group"
