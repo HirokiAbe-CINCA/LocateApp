@@ -71,7 +71,9 @@ public enum ProcessMatcher {
 
     private static func hasPymobiledeviceExecutable(_ tokens: [String]) -> Bool {
         tokens.contains { token in
-            URL(fileURLWithPath: token).lastPathComponent == "pymobiledevice3" ||
+            let executable = URL(fileURLWithPath: token).lastPathComponent
+            return executable == "pymobiledevice3" ||
+                executable == "pymobiledevice3-helper" ||
                 token == "pymobiledevice3"
         }
     }
@@ -183,28 +185,51 @@ public final class ProcessRunner: @unchecked Sendable {
             throw LocateError.processControlFailed("Cannot run an empty command")
         }
 
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocateAppProcess-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: outputDirectory)
+        }
+        let stdoutURL = outputDirectory.appendingPathComponent("stdout")
+        let stderrURL = outputDirectory.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
+        FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+        let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
+        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
+        defer {
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command[0])
         process.arguments = Array(command.dropFirst())
-
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
+        process.standardOutput = stdoutHandle
+        process.standardError = stderrHandle
 
         try process.run()
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning {
             if Date() >= deadline {
                 process.terminate()
+                let terminationDeadline = Date().addingTimeInterval(0.75)
+                while process.isRunning && Date() < terminationDeadline {
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+                if process.isRunning {
+                    Darwin.kill(process.processIdentifier, SIGKILL)
+                }
                 process.waitUntilExit()
                 throw LocateError.processControlFailed("Command timed out after \(Int(timeout))s: \(command[0])")
             }
             Thread.sleep(forTimeInterval: 0.05)
         }
 
-        let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        try? stdoutHandle.close()
+        try? stderrHandle.close()
+        let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
+        let stderr = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""
 
         guard process.terminationStatus == 0 else {
             throw LocateError.invalidDeviceList(stderr.isEmpty ? stdout : stderr)
@@ -319,6 +344,14 @@ public actor LocationSessionController {
     public func stopTunnel() throws {
         let script = commands.adminStopTunnelScript()
         _ = try runner.run(script.osascriptCommand)
+    }
+
+    public func isTunnelRunning() -> Bool {
+        guard let pid = try? readStoredPID(commands.files.tunnelPID),
+              let commandLine = processCommandLine(pid: pid) else {
+            return false
+        }
+        return ProcessMatcher.isTunnelCommand(commandLine)
     }
 
     private func verifySetProcessStarted() throws {

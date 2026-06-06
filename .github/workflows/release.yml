@@ -33,11 +33,15 @@ jobs:
           .venv/bin/python -m pytest
           swift run LocateAppCoreChecks
           swift build
-          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh
+          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/package_release.sh scripts/verify_release_artifacts.sh
 
       - name: Package release
         run: |
           VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
+
+      - name: Verify release artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
 
       - name: Publish GitHub Release
         env:

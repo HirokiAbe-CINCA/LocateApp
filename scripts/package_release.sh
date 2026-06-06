@@ -2,7 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-0.1.0}"
+if [[ -z "${VERSION:-}" ]]; then
+  if VERSION_TAG="$(git describe --tags --abbrev=0 2>/dev/null)"; then
+    VERSION="${VERSION_TAG#v}"
+  else
+    VERSION="0.1.0"
+  fi
+fi
 APP_NAME="LocateApp"
 APP="$ROOT/dist/$APP_NAME.app"
 RELEASE_DIR="$ROOT/release"
@@ -34,8 +40,9 @@ hdiutil create \
 cat > "$RELEASE_DIR/RELEASE_NOTES.md" <<NOTES
 # LocateApp $VERSION
 
-- macOS app bundle with embedded pymobiledevice3 helper.
-- Includes app icon and local ad-hoc signature.
+- Japanese low-step UI for choosing a place and fixing the connected iPhone location.
+- Hardened tunnel/process handling and release artifact verification.
+- Simplified geometric app icon and embedded pymobiledevice3 helper.
 - Not notarized yet; on first launch, use right-click Open if macOS Gatekeeper blocks the app.
 NOTES
 

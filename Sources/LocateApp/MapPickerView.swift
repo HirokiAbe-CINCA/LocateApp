@@ -77,7 +77,7 @@ struct MapPickerView: NSViewRepresentable {
 
         func updateAnnotation(on mapView: MKMapView) {
             annotation.coordinate = parent.coordinate
-            annotation.title = "Selected Location"
+            annotation.title = "選択中の場所"
             if !mapView.annotations.contains(where: { $0 === annotation }) {
                 mapView.addAnnotation(annotation)
             }
@@ -95,7 +95,7 @@ struct MapPickerView: NSViewRepresentable {
                 latitude: activeCoordinate.latitude,
                 longitude: activeCoordinate.longitude
             )
-            fixedAnnotation.title = "Fixed Location"
+            fixedAnnotation.title = "固定中の場所"
             if !mapView.annotations.contains(where: { $0 === fixedAnnotation }) {
                 mapView.addAnnotation(fixedAnnotation)
             }
@@ -113,7 +113,7 @@ struct MapPickerView: NSViewRepresentable {
             view.annotation = annotation
             view.canShowCallout = true
             view.markerTintColor = isFixed ? .systemOrange : .systemBlue
-            view.glyphText = isFixed ? "F" : "S"
+            view.glyphText = isFixed ? "固" : "選"
             return view
         }
     }
