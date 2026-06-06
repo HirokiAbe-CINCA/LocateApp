@@ -157,12 +157,16 @@ func runChecks() throws {
     let sessionCommands = LocateSessionCommands(paths: paths, files: files)
     let adminScript = sessionCommands.adminTunnelScript(device: device)
     try check(
-        adminScript.script.contains("&& (nohup '/repo/.venv/bin/pymobiledevice3'"),
+        adminScript.script.contains("&& ('/repo/.venv/bin/pymobiledevice3'"),
         "admin tunnel script should background inside a grouped shell command"
     )
     try check(
-        adminScript.script.contains("nohup '/repo/.venv/bin/pymobiledevice3' 'lockdown' 'start-tunnel'"),
-        "admin tunnel script is missing nohup tunnel command"
+        adminScript.script.contains("'/repo/.venv/bin/pymobiledevice3' 'lockdown' 'start-tunnel'"),
+        "admin tunnel script is missing tunnel command"
+    )
+    try check(
+        !adminScript.script.contains("nohup"),
+        "admin tunnel script should not use nohup because AppleScript administrator shells can reject console detach"
     )
     try check(
         adminScript.script.contains("echo $! > '/repo/.locateapp/tunnel.pid'"),

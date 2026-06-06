@@ -102,7 +102,7 @@ public struct LocateSessionCommands: Sendable {
     public func adminTunnelScript(device: DeviceInfo) -> AdminTunnelScript {
         let command = paths.tunnelCommand(device: device)
         let background = [
-            "nohup \(Shell.join(command)) > \(Shell.quote(files.tunnelOutput.path)) 2> \(Shell.quote(files.tunnelError.path)) &",
+            "\(Shell.join(command)) > \(Shell.quote(files.tunnelOutput.path)) 2> \(Shell.quote(files.tunnelError.path)) &",
             "echo $! > \(Shell.quote(files.tunnelPID.path))"
         ].joined(separator: " ")
         let scriptParts = [
