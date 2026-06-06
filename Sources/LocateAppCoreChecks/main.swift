@@ -27,6 +27,24 @@ func checkThrows(_ message: String, _ operation: () throws -> Void) throws {
     throw CheckFailure.message(message)
 }
 
+final class RecordingSleepAssertionClient: SleepAssertionClient, @unchecked Sendable {
+    var createdReasons: [String] = []
+    var releasedIDs: [UInt32] = []
+    var nextID: UInt32 = 100
+
+    func create(reason: String) throws -> UInt32 {
+        createdReasons.append(reason)
+        defer {
+            nextID += 1
+        }
+        return nextID
+    }
+
+    func release(id: UInt32) {
+        releasedIDs.append(id)
+    }
+}
+
 func runChecks() throws {
     let json = """
     [
@@ -122,6 +140,27 @@ func runChecks() throws {
     try checkThrows("invalid Developer Mode status did not throw") {
         _ = try DeveloperMode.isEnabled("maybe")
     }
+
+    let sleepClient = RecordingSleepAssertionClient()
+    let sleepPreventer = SleepPreventer(client: sleepClient, reason: "LocateApp is moving an iPhone")
+    try check(!sleepPreventer.isActive, "sleep preventer should start inactive")
+    try sleepPreventer.acquire()
+    try check(sleepPreventer.isActive, "sleep preventer should be active after acquire")
+    try check(sleepClient.createdReasons == ["LocateApp is moving an iPhone"], "sleep preventer should create one assertion")
+    try sleepPreventer.acquire()
+    try check(sleepClient.createdReasons.count == 1, "sleep preventer should not duplicate assertions")
+    sleepPreventer.release()
+    try check(!sleepPreventer.isActive, "sleep preventer should be inactive after release")
+    try check(sleepClient.releasedIDs == [100], "sleep preventer should release the active assertion")
+    sleepPreventer.release()
+    try check(sleepClient.releasedIDs == [100], "sleep preventer should ignore duplicate releases")
+
+    let deinitSleepClient = RecordingSleepAssertionClient()
+    do {
+        let scopedPreventer = SleepPreventer(client: deinitSleepClient, reason: "Scoped movement")
+        try scopedPreventer.acquire()
+    }
+    try check(deinitSleepClient.releasedIDs == [100], "sleep preventer should release on deinit")
 
     let paths = LocatePaths(
         root: URL(fileURLWithPath: "/repo"),

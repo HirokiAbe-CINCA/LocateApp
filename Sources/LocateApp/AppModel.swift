@@ -31,12 +31,14 @@ final class AppModel: ObservableObject {
     @Published var availableUpdate: ReleaseUpdate?
     @Published var isCheckingForUpdates = false
     @Published var updateStatus: String?
+    @Published var isPreventingSleep = false
     private var rsdDeviceID: String?
     @Published private var isPreparingConnection = false
     @Published private var connectionFailureMessage: String?
 
     private let paths: LocatePaths
     private let session: LocationSessionController
+    private let sleepPreventer = SleepPreventer()
     private let searchService = LocationSearchService()
     private var searchRequestSerial = 0
 
@@ -114,6 +116,19 @@ final class AppModel: ObservableObject {
         }
         let coordinateText = "\(activeCoordinate.latitudeText), \(activeCoordinate.longitudeText)"
         return activeLocationMayRemain ? "前回の移動先の可能性: \(coordinateText)" : coordinateText
+    }
+
+    var activeLocationCaution: String? {
+        guard activeCoordinate != nil else {
+            return nil
+        }
+        if activeLocationMayRemain {
+            return "USB接続やMacの状態により、すでに解除されている可能性があります。"
+        }
+        if isPreventingSleep {
+            return "Macの自動スリープを止めています。USBを抜く、Macをスリープ/終了すると解除されることがあります。"
+        }
+        return "USBを抜く、Macをスリープ/終了すると解除されることがあります。"
     }
 
     var stateDirectoryPath: String {
@@ -320,7 +335,7 @@ final class AppModel: ObservableObject {
                 self.activeCoordinate = coordinate
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
-                self.status = "移動しました。iPhoneを再起動するか「移動を解除」するまで、この場所が使われます。"
+                self.status = "移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
             } catch {
                 self.rsdEndpoint = nil
                 self.rsdDeviceID = nil
@@ -332,6 +347,7 @@ final class AppModel: ObservableObject {
     func resetLocation() {
         runBusy("移動を解除しています...") {
             try await self.session.stopSetProcess()
+            self.stopSleepPrevention()
 
             do {
                 let endpoint = try await self.ensureTunnel(forceRestart: true)
@@ -449,6 +465,22 @@ final class AppModel: ObservableObject {
         try await Task.detached {
             try operation()
         }.value
+    }
+
+    private func startSleepPreventionStatus() -> String {
+        do {
+            try sleepPreventer.acquire()
+            isPreventingSleep = sleepPreventer.isActive
+            return "Macの自動スリープを止めています。"
+        } catch {
+            isPreventingSleep = false
+            return "ただしMacのスリープ防止を開始できませんでした: \(userFacingMessage(for: error))"
+        }
+    }
+
+    private func stopSleepPrevention() {
+        sleepPreventer.release()
+        isPreventingSleep = false
     }
 
     private func userFacingMessage(for error: Error) -> String {

@@ -51,9 +51,14 @@ unlocking the device. The app prepares the iPhone communication path
 automatically when `この場所に移動` or `移動を解除` needs it.
 
 `この場所に移動` detaches the location-setting process and writes PID/log
-files under `.locateapp/`. The simulated location is expected to remain active
-after closing the Mac app, until the iPhone is restarted or `移動を解除` is
-clicked in the app.
+files under `.locateapp/`. While a moved location is active, the app asks macOS
+to keep the system awake so the iPhone developer connection can continue. The
+display may still dim or turn off.
+
+The simulated location depends on the Mac-side process, the USB cable, and the
+iPhone developer connection. Unplugging the cable, putting the Mac to sleep,
+quitting the app, shutting down the Mac, or restarting the iPhone can clear the
+simulated location.
 
 `移動を解除` terminates the stored set-location process and sends the DVT
 clear-location command through a recovered tunnel when needed. If the iPhone is
@@ -68,7 +73,8 @@ command fails.
 
 1. Open the app and check `現在の移動先`.
 2. If it says `前回の移動先が残っている可能性`, assume the iPhone may still
-   be using the simulated location.
+   be using the simulated location, but it may also have been cleared when the
+   Mac slept, the cable was unplugged, or the helper process stopped.
 3. Use `移動を解除` with the iPhone connected and unlocked.
 4. If reset cannot reach the iPhone, restart the iPhone. iOS restart is the
    authoritative fallback for clearing simulated location.
@@ -183,6 +189,8 @@ hold is 5 seconds; pass `--hold-seconds` to change it:
 
 - The app currently targets the proven iOS 17+ RSD/DVT route.
 - The RSD tunnel still requires macOS administrator approval.
+- Location simulation should be treated as active only while the Mac is awake,
+  the app/helper process is running, and the iPhone remains connected by USB.
 - Reset may ask for administrator approval again while it cleans up the RSD
   tunnel process.
 - If a future iOS or `pymobiledevice3` release changes this behavior, the app

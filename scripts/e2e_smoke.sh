@@ -94,7 +94,7 @@ tell application "System Events"
       set value of text field 2 of group 2 of panel to "35.659494, 139.700550"
       key code 36
       delay 1
-      set selectedAfterCoordinateInput to value of static text 5 of group 2 of panel
+      set selectedAfterCoordinateInput to my textDump(group 2 of panel)
       my assertContains(selectedAfterCoordinateInput, "35.659494")
     end tell
   end tell
