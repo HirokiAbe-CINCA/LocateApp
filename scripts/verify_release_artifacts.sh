@@ -79,6 +79,9 @@ if [[ -z "$MOUNT_DIR" ]]; then
   exit 1
 fi
 verify_app "$MOUNT_DIR/LocateApp.app"
+test -L "$MOUNT_DIR/Applications"
+test -f "$MOUNT_DIR/.background/installer-background.png"
+test -f "$MOUNT_DIR/.DS_Store"
 if find "$MOUNT_DIR" -type f \( -name 'AuthKey_*.p8' -o -name 'notary-*.json' -o -name '*-app-notary.zip' \) | grep -q .; then
   echo "DMG contains signing or notarization work files" >&2
   exit 1

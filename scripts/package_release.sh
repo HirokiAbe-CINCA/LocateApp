@@ -19,6 +19,9 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 NOTARIZE="${NOTARIZE:-auto}"
 NOTARIZE_ACTIVE=0
 NOTARY_KEY_PATH=""
+DMG_RW="$RELEASE_DIR/$ARCHIVE_BASE-rw.dmg"
+DMG_FINAL="$RELEASE_DIR/$ARCHIVE_BASE.dmg"
+MOUNT_DIR=""
 
 cd "$ROOT"
 
@@ -124,6 +127,66 @@ staple_artifact() {
   xcrun stapler validate "$artifact"
 }
 
+mount_dmg() {
+  local dmg="$1"
+  hdiutil attach "$dmg" -readwrite -noverify -noautoopen |
+    awk '/\/Volumes\// {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^\/Volumes\//) {
+          print substr($0, index($0, $i))
+          exit
+        }
+      }
+    }'
+}
+
+detach_mounted_dmg() {
+  local mount_dir="$1"
+  for _ in 1 2 3 4 5; do
+    if hdiutil detach "$mount_dir" -quiet; then
+      return 0
+    fi
+    sleep 1
+  done
+  hdiutil detach "$mount_dir"
+}
+
+cleanup_mount() {
+  if [[ -n "${MOUNT_DIR:-}" ]]; then
+    hdiutil detach "$MOUNT_DIR" -quiet || true
+  fi
+}
+
+style_dmg_window() {
+  local mount_dir="$1"
+  osascript - "$mount_dir" "$APP_NAME" >/dev/null <<'APPLESCRIPT'
+on run argv
+  set mountPath to item 1 of argv
+  set appName to item 2 of argv
+  set mountFolder to POSIX file mountPath as alias
+tell application "Finder"
+  open mountFolder
+  set targetWindow to container window of mountFolder
+  set current view of targetWindow to icon view
+  set toolbar visible of targetWindow to false
+  set statusbar visible of targetWindow to false
+  set bounds of targetWindow to {120, 120, 1040, 540}
+  set viewOptions to the icon view options of targetWindow
+  set arrangement of viewOptions to not arranged
+  set icon size of viewOptions to 96
+  set background picture of viewOptions to file ".background:installer-background.png" of mountFolder
+  set position of item (appName & ".app") of mountFolder to {300, 306}
+  set position of item "Applications" of mountFolder to {620, 306}
+  update mountFolder without registering applications
+  delay 1
+  close targetWindow
+end tell
+end run
+APPLESCRIPT
+  sync
+  detach_mounted_dmg "$mount_dir"
+}
+
 rm -rf "$RELEASE_DIR" "$DMG_STAGING_DIR" "$NOTARY_WORK_DIR"
 mkdir -p "$RELEASE_DIR" "$DMG_STAGING_DIR" "$NOTARY_WORK_DIR"
 
@@ -153,19 +216,33 @@ fi
 
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$RELEASE_DIR/$ARCHIVE_BASE.zip"
 
-mkdir -p "$DMG_STAGING_DIR"
+mkdir -p "$DMG_STAGING_DIR/.background"
 cp -R "$APP" "$DMG_STAGING_DIR/"
+ln -s /Applications "$DMG_STAGING_DIR/Applications"
+"$ROOT/.venv/bin/python" "$ROOT/scripts/generate_dmg_background.py" \
+  --output "$DMG_STAGING_DIR/.background/installer-background.png"
 hdiutil create \
   -volname "$APP_NAME" \
   -srcfolder "$DMG_STAGING_DIR" \
   -ov \
-  -format UDZO \
-  "$RELEASE_DIR/$ARCHIVE_BASE.dmg"
+  -format UDRW \
+  "$DMG_RW"
+
+trap cleanup_mount EXIT
+MOUNT_DIR="$(mount_dmg "$DMG_RW")"
+if [[ -z "$MOUNT_DIR" ]]; then
+  echo "Failed to mount temporary DMG for styling" >&2
+  exit 1
+fi
+style_dmg_window "$MOUNT_DIR"
+MOUNT_DIR=""
+hdiutil convert "$DMG_RW" -format UDZO -imagekey zlib-level=9 -o "$DMG_FINAL"
+rm -f "$DMG_RW"
 
 if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
-  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$RELEASE_DIR/$ARCHIVE_BASE.dmg"
-  submit_for_notarization "$RELEASE_DIR/$ARCHIVE_BASE.dmg" "$APP_NAME DMG"
-  staple_artifact "$RELEASE_DIR/$ARCHIVE_BASE.dmg"
+  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_FINAL"
+  submit_for_notarization "$DMG_FINAL" "$APP_NAME DMG"
+  staple_artifact "$DMG_FINAL"
   NOTARIZATION_NOTE="- Developer ID signed, notarized, and stapled for Gatekeeper."
 else
   NOTARIZATION_NOTE="- Ad-hoc signed and not notarized yet; set Apple signing/notary secrets to notarize release artifacts."
@@ -175,6 +252,8 @@ cat > "$RELEASE_DIR/RELEASE_NOTES.md" <<NOTES
 # LocateApp $VERSION
 
 - Japanese low-step UI for choosing a place and moving the connected iPhone location.
+- In-app update notice with a direct download button for newer GitHub Releases.
+- Styled DMG installer with a LocateApp background and Applications shortcut.
 - Hardened tunnel/process handling and release artifact verification.
 - Simplified geometric app icon and embedded pymobiledevice3 helper.
 $NOTARIZATION_NOTE

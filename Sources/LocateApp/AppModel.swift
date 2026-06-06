@@ -28,6 +28,9 @@ final class AppModel: ObservableObject {
     @Published var coordinateInputText: String = "35.681236, 139.767125"
     @Published var selectedLocationName: String?
     @Published var activeLocationName: String?
+    @Published var availableUpdate: ReleaseUpdate?
+    @Published var isCheckingForUpdates = false
+    @Published var updateStatus: String?
     private var rsdDeviceID: String?
     @Published private var isPreparingConnection = false
     @Published private var connectionFailureMessage: String?
@@ -119,6 +122,10 @@ final class AppModel: ObservableObject {
 
     var stateDirectoryURL: URL {
         paths.stateDirectory
+    }
+
+    var currentVersionText: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
     }
 
     init() {
@@ -255,6 +262,44 @@ final class AppModel: ObservableObject {
             _ = try await self.ensureTunnel(forceRestart: true)
             self.status = "接続準備ができました。「この場所に移動」を押してください。"
         }
+    }
+
+    func checkForUpdates() {
+        guard !isCheckingForUpdates else {
+            return
+        }
+
+        Task {
+            isCheckingForUpdates = true
+            defer {
+                isCheckingForUpdates = false
+            }
+
+            do {
+                var request = URLRequest(url: URL(string: "https://api.github.com/repos/HirokiAbe-CINCA/LocateApp/releases/latest")!)
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                request.setValue("LocateApp/\(currentVersionText)", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse,
+                   !(200..<300).contains(httpResponse.statusCode) {
+                    updateStatus = "アップデート確認に失敗しました。"
+                    return
+                }
+
+                let jsonText = String(decoding: data, as: UTF8.self)
+                availableUpdate = try ReleaseUpdate.parse(jsonText, currentVersion: currentVersionText)
+                updateStatus = availableUpdate == nil ? nil : "新しいバージョンがあります。"
+            } catch {
+                updateStatus = "アップデート確認に失敗しました。"
+            }
+        }
+    }
+
+    func openAvailableUpdate() {
+        guard let availableUpdate else {
+            return
+        }
+        NSWorkspace.shared.open(availableUpdate.downloadURL)
     }
 
     func moveToSelectedLocation() {

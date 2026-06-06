@@ -42,10 +42,13 @@ BUNDLE_HELPER=1 CONFIGURATION=release ./scripts/build_app_bundle.sh
 In the app:
 
 1. Connect and unlock the iPhone.
-2. Click `接続を確認`.
-3. Search for a place by name, enter `lat, lon`, or click a point on the map.
-4. Click `この場所に移動`.
-5. Approve the macOS administrator prompt when the RSD tunnel starts.
+2. Search for a place by name, enter `lat, lon`, or click a point on the map.
+3. Click `この場所に移動`.
+4. Approve the macOS administrator prompt if it appears.
+
+Use `接続を確認` only when the iPhone status does not update after connecting or
+unlocking the device. The app prepares the iPhone communication path
+automatically when `この場所に移動` or `移動を解除` needs it.
 
 `この場所に移動` detaches the location-setting process and writes PID/log
 files under `.locateapp/`. The simulated location is expected to remain active
@@ -57,7 +60,7 @@ clear-location command through a recovered tunnel when needed. If the iPhone is
 not reachable and the simulated location still appears active, restart the
 iPhone to force iOS to clear the simulated location.
 
-Use `ログ` to inspect `.locateapp/tunnel.out`, `.locateapp/tunnel.err`,
+Use `診断情報` to inspect `.locateapp/tunnel.out`, `.locateapp/tunnel.err`,
 `.locateapp/set.out`, and `.locateapp/set.err` when the tunnel or location set
 command fails.
 
@@ -79,6 +82,8 @@ repo-local `.venv`.
 Download the latest `LocateApp-*-mac-arm64.dmg` or `.zip` from
 [GitHub Releases](https://github.com/HirokiAbe-CINCA/LocateApp/releases).
 Open the DMG or unzip the archive, then copy `LocateApp.app` to `/Applications`.
+The app also checks GitHub Releases on launch and shows an in-app update notice
+when a newer DMG is available.
 
 Release builds are ad-hoc signed but not notarized yet. On the first launch,
 macOS may require right-clicking `LocateApp.app` and choosing `Open`.
@@ -93,7 +98,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The Release workflow uploads the DMG, ZIP, and `SHA256SUMS.txt`.
+The Release workflow uploads the styled DMG, ZIP, and `SHA256SUMS.txt`.
 
 Developer ID signing and notarization are supported when Apple secrets are set
 in GitHub Actions. See `docs/notarization.md` for the required Apple account
