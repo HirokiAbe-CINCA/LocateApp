@@ -305,6 +305,30 @@ func runChecks() throws {
         !ProcessMatcher.isTunnelCommand("/repo/.venv/bin/pymobiledevice3 lockdown stop-tunnel --script-mode --udid id"),
         "tunnel process matcher matched unrelated lockdown command"
     )
+    try check(
+        LocationContinuityAssessment.assess(tunnelRunning: true, setProcessRunning: true) == .active,
+        "continuity should be active when tunnel and set process are both running"
+    )
+    try check(
+        LocationContinuityAssessment.assess(tunnelRunning: false, setProcessRunning: true) == .uncertain(.tunnelClosed),
+        "continuity should be uncertain when the tunnel closes"
+    )
+    try check(
+        LocationContinuityAssessment.assess(tunnelRunning: true, setProcessRunning: false) == .uncertain(.setProcessStopped),
+        "continuity should be uncertain when the set process stops"
+    )
+    try check(
+        LocationReapplyPrompt.isAvailable(hasActiveCoordinate: true, activeLocationMayRemain: true),
+        "reapply prompt should be available when an active location is uncertain"
+    )
+    try check(
+        !LocationReapplyPrompt.isAvailable(hasActiveCoordinate: true, activeLocationMayRemain: false),
+        "reapply prompt should not be available while the active location is healthy"
+    )
+    try check(
+        !LocationReapplyPrompt.isAvailable(hasActiveCoordinate: false, activeLocationMayRemain: true),
+        "reapply prompt should not be available without a previous coordinate"
+    )
 
     let parsedPID = try PIDFile.parse("1234\n")
     try check(parsedPID == 1234, "pid parse mismatch")

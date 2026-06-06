@@ -261,6 +261,20 @@ struct DevicePanel: View {
                 .font(.caption)
                 .foregroundStyle(model.isPreventingSleep ? Color.secondary : Color.orange)
             }
+
+            if model.canReapplyActiveLocation {
+                Button {
+                    model.reapplyActiveLocation()
+                } label: {
+                    Label("前回の場所へ再移動", systemImage: "arrow.clockwise.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(model.isBusy)
+                .accessibilityLabel("前回の場所へ再移動")
+                .help("iPhoneを接続・ロック解除して、前回の座標をもう一度設定します。")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

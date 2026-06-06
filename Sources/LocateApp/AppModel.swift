@@ -4,6 +4,27 @@ import CoreLocation
 import Foundation
 import LocateAppCore
 
+private final class PowerEventObserverBag {
+    private var observers: [NSObjectProtocol] = []
+
+    var isEmpty: Bool {
+        observers.isEmpty
+    }
+
+    func replace(with observers: [NSObjectProtocol]) {
+        for observer in self.observers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        self.observers = observers
+    }
+
+    deinit {
+        for observer in observers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+    }
+}
+
 enum ConnectionStateKind {
     case unavailable
     case detected
@@ -41,6 +62,12 @@ final class AppModel: ObservableObject {
     private let sleepPreventer = SleepPreventer()
     private let searchService = LocationSearchService()
     private var searchRequestSerial = 0
+    private var locationContinuityTask: Task<Void, Never>?
+    private let powerEventObserverBag = PowerEventObserverBag()
+
+    deinit {
+        locationContinuityTask?.cancel()
+    }
 
     var selectedDevice: DeviceInfo? {
         devices.first { $0.identifier == selectedDeviceID } ?? devices.first
@@ -123,12 +150,19 @@ final class AppModel: ObservableObject {
             return nil
         }
         if activeLocationMayRemain {
-            return "USB接続やMacの状態により、すでに解除されている可能性があります。"
+            return "USB接続、蓋閉じ、Macのスリープ状態により、すでに解除されている可能性があります。"
         }
         if isPreventingSleep {
-            return "Macの自動スリープを止めています。USBを抜く、Macをスリープ/終了すると解除されることがあります。"
+            return "Macの自動スリープを止めています。USBを抜く、蓋を閉じる、Macをスリープ/終了すると解除されることがあります。"
         }
-        return "USBを抜く、Macをスリープ/終了すると解除されることがあります。"
+        return "USBを抜く、蓋を閉じる、Macをスリープ/終了すると解除されることがあります。"
+    }
+
+    var canReapplyActiveLocation: Bool {
+        LocationReapplyPrompt.isAvailable(
+            hasActiveCoordinate: activeCoordinate != nil,
+            activeLocationMayRemain: activeLocationMayRemain
+        )
     }
 
     var stateDirectoryPath: String {
@@ -267,7 +301,21 @@ final class AppModel: ObservableObject {
             if let coordinate = try? await session.readActiveCoordinate() {
                 activeCoordinate = coordinate
                 activeLocationMayRemain = true
-                status = "前回の移動先が残っている可能性があります。戻す場合は「移動を解除」を押してください。"
+                status = "前回の移動先が残っている可能性があります。iPhoneを接続・ロック解除して「前回の場所へ再移動」または「移動を解除」を選んでください。"
+            }
+        }
+    }
+
+    func startLocationContinuityMonitoring() {
+        installPowerEventObserversIfNeeded()
+        guard locationContinuityTask == nil else {
+            return
+        }
+
+        locationContinuityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                await self?.checkActiveLocationContinuity()
             }
         }
     }
@@ -336,6 +384,33 @@ final class AppModel: ObservableObject {
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
                 self.status = "移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
+            } catch {
+                self.rsdEndpoint = nil
+                self.rsdDeviceID = nil
+                throw error
+            }
+        }
+    }
+
+    func reapplyActiveLocation() {
+        runBusy("前回の移動先へ再移動しています...") {
+            guard let coordinate = self.activeCoordinate else {
+                self.status = "再移動する前回の移動先がありません。"
+                return
+            }
+
+            do {
+                self.selectedMapCoordinate = CLLocationCoordinate2D(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude
+                )
+                self.coordinateInputText = "\(coordinate.latitudeText), \(coordinate.longitudeText)"
+                let endpoint = try await self.ensureTunnel(forceRestart: true)
+                try await self.session.prepare(endpoint: endpoint)
+                try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                self.activeCoordinate = coordinate
+                self.activeLocationMayRemain = false
+                self.status = "前回の移動先へ再移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
             } catch {
                 self.rsdEndpoint = nil
                 self.rsdDeviceID = nil
@@ -481,6 +556,76 @@ final class AppModel: ObservableObject {
     private func stopSleepPrevention() {
         sleepPreventer.release()
         isPreventingSleep = false
+    }
+
+    private func installPowerEventObserversIfNeeded() {
+        guard powerEventObserverBag.isEmpty else {
+            return
+        }
+
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        powerEventObserverBag.replace(with: [
+            notificationCenter.addObserver(
+                forName: NSWorkspace.willSleepNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.markActiveLocationUncertain(
+                        reason: "Macがスリープまたは蓋閉じに入ったため、位置情報が解除された可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+                    )
+                }
+            },
+            notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.markActiveLocationUncertain(
+                        reason: "Macのスリープ復帰を検出しました。iPhone側の位置情報は解除済みの可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+                    )
+                }
+            }
+        ])
+    }
+
+    private func checkActiveLocationContinuity() async {
+        guard activeCoordinate != nil,
+              !activeLocationMayRemain,
+              !isBusy else {
+            return
+        }
+
+        let tunnelRunning = await session.isTunnelRunning()
+        let setProcessRunning = await session.isSetProcessRunning()
+        let assessment = LocationContinuityAssessment.assess(
+            tunnelRunning: tunnelRunning,
+            setProcessRunning: setProcessRunning
+        )
+        switch assessment {
+        case .active:
+            break
+        case .uncertain(.tunnelClosed):
+            markActiveLocationUncertain(
+                reason: "iPhoneとの通信トンネルが切れました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+            )
+        case .uncertain(.setProcessStopped):
+            markActiveLocationUncertain(
+                reason: "Mac側の位置設定プロセスが停止しました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+            )
+        }
+    }
+
+    private func markActiveLocationUncertain(reason: String) {
+        guard activeCoordinate != nil else {
+            return
+        }
+        activeLocationMayRemain = true
+        rsdEndpoint = nil
+        rsdDeviceID = nil
+        stopSleepPrevention()
+        status = reason
     }
 
     private func userFacingMessage(for error: Error) -> String {
