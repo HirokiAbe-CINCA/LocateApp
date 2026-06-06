@@ -85,11 +85,12 @@ Open the DMG or unzip the archive, then copy `LocateApp.app` to `/Applications`.
 The app also checks GitHub Releases on launch and shows an in-app update notice
 when a newer DMG is available.
 
-Release builds are ad-hoc signed but not notarized yet. On the first launch,
-macOS may require right-clicking `LocateApp.app` and choosing `Open`.
-The embedded helper is intentionally self-contained; commands such as Refresh
-or Reset can take longer than repo-local development builds while the helper
-starts.
+Current release builds are Developer ID signed and notarized, so macOS should
+allow normal first launch after copying `LocateApp.app` to `/Applications`.
+Older pre-notarization builds may still require right-clicking `LocateApp.app`
+and choosing `Open`. The embedded helper is intentionally self-contained;
+commands such as Refresh or Reset can take longer than repo-local development
+builds while the helper starts.
 
 Release artifacts are produced by pushing a version tag:
 
@@ -100,10 +101,10 @@ git push origin v0.1.0
 
 The Release workflow uploads the styled DMG, ZIP, and `SHA256SUMS.txt`.
 
-Developer ID signing and notarization are supported when Apple secrets are set
-in GitHub Actions. See `docs/notarization.md` for the required Apple account
-steps and secret names. Without those secrets, release builds remain ad-hoc
-signed.
+Developer ID signing and notarization run in GitHub Actions when Apple secrets
+are set. See `docs/notarization.md` for the required Apple account steps and
+secret names. Without those secrets, release builds fall back to ad-hoc
+signing.
 
 ## Cleanup
 
