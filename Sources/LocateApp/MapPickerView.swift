@@ -133,7 +133,7 @@ struct MapPickerView: NSViewRepresentable {
             view.annotation = annotation
             view.canShowCallout = true
             view.markerTintColor = isActive ? .systemOrange : .systemBlue
-            view.glyphText = isActive ? "移" : "選"
+            view.glyphText = isActive ? "移" : "📱"
             return view
         }
     }
