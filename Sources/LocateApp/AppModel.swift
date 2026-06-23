@@ -63,6 +63,7 @@ final class AppModel: ObservableObject {
     private let autoRecoveryPolicy = LocationAutoRecoveryPolicy()
     private var autoRecoveryTask: Task<Void, Never>?
     private var autoRecoveryGeneration = 0
+    private var tunnelPreparationGeneration = 0
     private let powerEventObserverBag = PowerEventObserverBag()
 
     deinit {
@@ -481,8 +482,7 @@ final class AppModel: ObservableObject {
         }
 
         try checkContinuation()
-        isPreparingConnection = true
-        connectionFailureMessage = nil
+        let tunnelPreparationGeneration = beginTunnelPreparation()
         do {
             try checkContinuation()
             status = "管理者認証が表示されたら承認してください。iPhone接続の準備に使います。"
@@ -496,8 +496,10 @@ final class AppModel: ObservableObject {
                     try checkContinuation()
                     rsdEndpoint = endpoint
                     rsdDeviceID = selectedDevice.identifier
-                    isPreparingConnection = false
-                    connectionFailureMessage = nil
+                    endTunnelPreparation(tunnelPreparationGeneration)
+                    if self.tunnelPreparationGeneration == tunnelPreparationGeneration {
+                        connectionFailureMessage = nil
+                    }
                     return endpoint
                 }
                 try await Task.sleep(nanoseconds: 500_000_000)
@@ -511,10 +513,32 @@ final class AppModel: ObservableObject {
             try checkContinuation()
             throw LocateError.invalidRSDOutput("15秒以内にiPhone接続を準備できませんでした。iPhoneの接続・ロック解除・管理者認証の承認を確認して、もう一度試してください。急いで解除したい場合はiPhoneを再起動してください。")
         } catch {
-            try checkContinuation()
+            if let shouldContinue, !shouldContinue() {
+                endTunnelPreparation(tunnelPreparationGeneration)
+                throw CancellationError()
+            }
+            failTunnelPreparation(tunnelPreparationGeneration, error: error)
+            throw error
+        }
+    }
+
+    private func beginTunnelPreparation() -> Int {
+        tunnelPreparationGeneration += 1
+        isPreparingConnection = true
+        connectionFailureMessage = nil
+        return tunnelPreparationGeneration
+    }
+
+    private func endTunnelPreparation(_ generation: Int) {
+        if tunnelPreparationGeneration == generation {
+            isPreparingConnection = false
+        }
+    }
+
+    private func failTunnelPreparation(_ generation: Int, error: Error) {
+        if tunnelPreparationGeneration == generation {
             isPreparingConnection = false
             connectionFailureMessage = userFacingMessage(for: error)
-            throw error
         }
     }
 
