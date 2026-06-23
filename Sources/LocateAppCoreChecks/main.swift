@@ -340,6 +340,26 @@ func runChecks() throws {
         !LocationAutoRecoveryErrorClassifier.isUserCancellation("No route to host"),
         "ordinary connection errors should remain retryable"
     )
+    try check(
+        !LocationAutoRecoveryErrorClassifier.isUserCancellation("coordinate -128.123 is not a cancellation"),
+        "unrelated -128 values should remain retryable"
+    )
+    try check(
+        LocationAutoRecoveryPolicy(maxAttempts: 0).attempts.isEmpty,
+        "zero recovery attempts should not produce any scheduled attempts"
+    )
+    try check(
+        LocationAutoRecoveryPolicy(maxAttempts: -1).attempts.isEmpty,
+        "negative recovery attempts should not produce any scheduled attempts"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(0) == nil,
+        "zero-numbered recovery attempts should not be allowed"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(-1) == nil,
+        "negative-numbered recovery attempts should not be allowed"
+    )
 
     let parsedPID = try PIDFile.parse("1234\n")
     try check(parsedPID == 1234, "pid parse mismatch")

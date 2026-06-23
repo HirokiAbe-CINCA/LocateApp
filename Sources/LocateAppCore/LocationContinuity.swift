@@ -66,9 +66,10 @@ public struct LocationAutoRecoveryPolicy: Equatable, Sendable {
 
 public enum LocationAutoRecoveryErrorClassifier {
     public static func isUserCancellation(_ message: String) -> Bool {
-        message.localizedCaseInsensitiveContains("User canceled") ||
+        let normalizedMessage = message.lowercased()
+        return normalizedMessage.contains("user canceled") ||
             message.localizedCaseInsensitiveContains("キャンセル") ||
-            message.localizedCaseInsensitiveContains("(-128)") ||
-            message.localizedCaseInsensitiveContains("-128")
+            normalizedMessage.contains("(-128)") ||
+            normalizedMessage.contains("osascript error -128")
     }
 }
