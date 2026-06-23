@@ -5,7 +5,6 @@ public enum LocateError: Error, Equatable, LocalizedError, Sendable {
     case missingDeviceIdentifier
     case invalidRSDOutput(String)
     case invalidCoordinate(String)
-    case invalidReleaseResponse(String)
     case helperMissing(String)
     case processControlFailed(String)
 
@@ -19,8 +18,6 @@ public enum LocateError: Error, Equatable, LocalizedError, Sendable {
             return "Invalid RSD output: \(output)"
         case .invalidCoordinate(let message):
             return message
-        case .invalidReleaseResponse(let message):
-            return "Invalid release response: \(message)"
         case .helperMissing(let path):
             return "pymobiledevice3 was not found at \(path)"
         case .processControlFailed(let message):
@@ -158,87 +155,6 @@ public struct Coordinate: Equatable, Sendable {
             text.removeLast()
         }
         return text
-    }
-}
-
-public struct ReleaseUpdate: Equatable, Sendable {
-    public let version: String
-    public let releaseURL: URL
-    public let downloadURL: URL
-
-    public static func parse(_ jsonText: String, currentVersion: String) throws -> ReleaseUpdate? {
-        let data = Data(jsonText.utf8)
-        let raw = try JSONSerialization.jsonObject(with: data)
-        guard let release = raw as? [String: Any],
-              let tagName = release["tag_name"] as? String,
-              let releaseURLText = release["html_url"] as? String,
-              let releaseURL = URL(string: releaseURLText),
-              let assets = release["assets"] as? [[String: Any]] else {
-            throw LocateError.invalidReleaseResponse("unexpected GitHub release response")
-        }
-
-        let version = normalizedVersion(tagName)
-        guard let comparison = compare(version, currentVersion) else {
-            throw LocateError.invalidReleaseResponse("unsupported release version: \(tagName)")
-        }
-        guard comparison == .orderedDescending else {
-            return nil
-        }
-
-        let asset = assets.first { asset in
-            guard let name = asset["name"] as? String else {
-                return false
-            }
-            return name.hasSuffix(".dmg") && name.contains("mac-arm64")
-        } ?? assets.first { asset in
-            guard let name = asset["name"] as? String else {
-                return false
-            }
-            return name.hasSuffix(".dmg")
-        }
-
-        guard let asset,
-              let downloadURLText = asset["browser_download_url"] as? String,
-              let downloadURL = URL(string: downloadURLText) else {
-            throw LocateError.invalidReleaseResponse("latest release does not include a DMG asset")
-        }
-
-        return ReleaseUpdate(version: version, releaseURL: releaseURL, downloadURL: downloadURL)
-    }
-
-    private static func normalizedVersion(_ text: String) -> String {
-        if text.hasPrefix("v") || text.hasPrefix("V") {
-            return String(text.dropFirst())
-        }
-        return text
-    }
-
-    private static func compare(_ left: String, _ right: String) -> ComparisonResult? {
-        guard let leftParts = versionComponents(left),
-              let rightParts = versionComponents(right) else {
-            return nil
-        }
-        let count = max(leftParts.count, rightParts.count)
-        for index in 0..<count {
-            let leftValue = index < leftParts.count ? leftParts[index] : 0
-            let rightValue = index < rightParts.count ? rightParts[index] : 0
-            if leftValue > rightValue {
-                return .orderedDescending
-            }
-            if leftValue < rightValue {
-                return .orderedAscending
-            }
-        }
-        return .orderedSame
-    }
-
-    private static func versionComponents(_ text: String) -> [Int]? {
-        let normalized = normalizedVersion(text)
-        guard !normalized.isEmpty,
-              normalized.range(of: #"^\d+(\.\d+)*$"#, options: .regularExpression) != nil else {
-            return nil
-        }
-        return normalized.split(separator: ".").compactMap { Int($0) }
     }
 }
 

@@ -1,8 +1,37 @@
+import Sparkle
 import SwiftUI
+
+struct CheckForUpdatesView: View {
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+    }
+
+    var body: some View {
+        Button("Check for Updates...") {
+            updater.checkForUpdates()
+        }
+    }
+}
 
 @main
 struct LocateAppMain: App {
     @StateObject private var model = AppModel()
+    private let updaterController: SPUStandardUpdaterController?
+
+    init() {
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
+           Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") != nil {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
+        } else {
+            updaterController = nil
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -13,10 +42,16 @@ struct LocateAppMain: App {
                     model.startLocationContinuityMonitoring()
                     model.restorePreviousSession()
                     model.refreshDevices()
-                    model.checkForUpdates()
                 }
         }
         .windowStyle(.titleBar)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                if let updater = updaterController?.updater {
+                    CheckForUpdatesView(updater: updater)
+                }
+            }
+        }
     }
 }
 

@@ -100,8 +100,9 @@ repo-local `.venv`.
 Download the latest `LocateApp-*-mac-arm64.dmg` or `.zip` from
 [GitHub Releases](https://github.com/HirokiAbe-CINCA/LocateApp/releases).
 Open the DMG or unzip the archive, then copy `LocateApp.app` to `/Applications`.
-The app also checks GitHub Releases on launch and shows an in-app update notice
-when a newer DMG is available.
+Signed release builds use Sparkle for automatic in-app updates. Sparkle checks
+the published appcast feed and can download and install newer signed ZIP
+updates in the background when macOS allows it.
 
 Current release builds are Developer ID signed and notarized, so macOS should
 allow normal first launch after copying `LocateApp.app` to `/Applications`.
@@ -117,12 +118,17 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The Release workflow uploads the styled DMG, ZIP, and `SHA256SUMS.txt`.
+The Release workflow uploads the styled DMG, ZIP, `SHA256SUMS.txt`, and
+`appcast.xml`. The appcast is also deployed to GitHub Pages for Sparkle:
 
-Developer ID signing and notarization run in GitHub Actions when Apple secrets
-are set. See `docs/notarization.md` for the required Apple account steps and
-secret names. Without those secrets, release builds fall back to ad-hoc
-signing.
+```text
+https://hirokiabe-cinca.github.io/LocateApp/appcast.xml
+```
+
+GitHub tag releases require Apple Developer ID/notarization secrets and Sparkle
+EdDSA key secrets. They fail if notarization or automatic-update appcast
+generation cannot complete. See `docs/notarization.md` for the required account
+steps and secret names.
 
 ## Cleanup
 
@@ -213,7 +219,7 @@ hold is 5 seconds; pass `--hold-seconds` to change it:
 ## Verification
 
 ```bash
-swift run LocateAppCoreChecks
+bash scripts/run_swift_core_checks.sh
 .venv/bin/python -m pytest
 ./scripts/build_app_bundle.sh
 ./scripts/e2e_smoke.sh

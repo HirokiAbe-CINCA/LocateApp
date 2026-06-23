@@ -39,6 +39,8 @@ Developer ID Installer is only needed if LocateApp later ships as a signed
 | `APPLE_NOTARY_KEY_P8_BASE64` | Base64-encoded App Store Connect Team API `.p8` private key |
 | `APPLE_NOTARY_KEY_ID` | App Store Connect API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | App Store Connect issuer ID |
+| `SPARKLE_PUBLIC_ED_KEY` | Public EdDSA key printed by Sparkle `generate_keys`; embedded in release app `Info.plist` |
+| `SPARKLE_ED_PRIVATE_KEY` | Private EdDSA key exported by Sparkle `generate_keys -x`; used only by CI to sign update archives and appcasts |
 
 Use this command locally to base64-encode files without printing secret values
 to shell history:
@@ -55,13 +57,37 @@ for path in ["DeveloperID.p12", "AuthKey_KEYID.p8"]:
 PY
 ```
 
+Generate Sparkle keys from a trusted Mac with the Sparkle distribution tools:
+
+```bash
+./bin/generate_keys
+./bin/generate_keys -x sparkle-ed25519-private-key.txt
+```
+
+Store the printed public key as `SPARKLE_PUBLIC_ED_KEY`. Store the exact
+contents of `sparkle-ed25519-private-key.txt` as `SPARKLE_ED_PRIVATE_KEY`.
+Never commit the private key or paste it into issues, PRs, chat, or logs.
+CI derives the public key from `SPARKLE_ED_PRIVATE_KEY` and fails the release
+if it does not match the public key embedded in the app.
+
 ## Release Behavior
 
 When these secrets are present, `.github/workflows/release.yml` imports the
 certificate into a temporary keychain, builds the app with Developer ID signing,
 submits the app archive and DMG with `xcrun notarytool`, staples tickets to the
-app and DMG, then verifies with `codesign`, `spctl`, and `stapler`.
+app and DMG, signs a Sparkle appcast for the ZIP update, then verifies with
+`codesign`, `spctl`, `stapler`, and appcast structure checks.
 
-When the secrets are absent, the workflow keeps producing ad-hoc signed ZIP and
-DMG artifacts. That fallback keeps local and CI release checks usable while the
-Apple account setup is pending.
+The Sparkle feed URL embedded in signed builds is:
+
+```text
+https://hirokiabe-cinca.github.io/LocateApp/appcast.xml
+```
+
+The release workflow uploads `appcast.xml` to the GitHub Release for audit and
+deploys the same file to GitHub Pages after the Release assets are available.
+
+Tag releases require the Apple signing/notarization secrets and Sparkle secrets.
+They fail if notarization or appcast generation cannot complete. Local manual
+packaging can still be run without those secrets, but those artifacts are not
+suitable for the automatic-update release channel.
