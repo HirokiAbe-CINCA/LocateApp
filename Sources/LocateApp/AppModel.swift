@@ -385,7 +385,8 @@ final class AppModel: ObservableObject {
             }
 
             do {
-                let operationDeviceID = try self.targetDeviceIDForCurrentOperation()
+                let operationDevice = try await self.ensureSelectedDevice()
+                let operationDeviceID = operationDevice.identifier
                 self.selectedMapCoordinate = CLLocationCoordinate2D(
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude
