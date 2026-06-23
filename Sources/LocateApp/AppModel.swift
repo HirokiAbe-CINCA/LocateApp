@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
     @Published var selectedLocationName: String?
     @Published var activeLocationName: String?
     @Published var isPreventingSleep = false
+    private var activeDeviceID: String?
     private var rsdDeviceID: String?
     @Published private var isPreparingConnection = false
     @Published private var connectionFailureMessage: String?
@@ -205,11 +206,23 @@ final class AppModel: ObservableObject {
     }
 
     func selectDevice(_ identifier: String) {
+        let selectionChanged = selectedDeviceID != identifier
+        if selectionChanged {
+            cancelAutoRecovery()
+        }
         selectedDeviceID = identifier
         connectionFailureMessage = nil
         if rsdDeviceID != identifier {
             rsdEndpoint = nil
             rsdDeviceID = nil
+        }
+        if selectionChanged,
+           activeCoordinate != nil,
+           let activeDeviceID,
+           activeDeviceID != identifier {
+            markActiveLocationUncertain(
+                reason: "対象iPhoneが変更されたため、自動再接続を停止しました。必要なiPhoneを選び直して「前回の場所へ再移動」を選んでください。"
+            )
         }
     }
 
@@ -302,6 +315,7 @@ final class AppModel: ObservableObject {
         Task {
             if let coordinate = try? await session.readActiveCoordinate() {
                 activeCoordinate = coordinate
+                activeDeviceID = nil
                 activeLocationMayRemain = true
                 status = "前回の移動先が残っている可能性があります。iPhoneを接続・ロック解除して「前回の場所へ再移動」または「移動を解除」を選んでください。"
             }
@@ -333,6 +347,7 @@ final class AppModel: ObservableObject {
         cancelAutoRecovery()
         runBusy("iPhoneの場所を移動しています...") {
             do {
+                let selectedDeviceID = self.selectedDevice?.identifier
                 let coordinate = try Coordinate.parsePair(self.coordinateInputText)
                 if abs(self.selectedMapCoordinate.latitude - coordinate.latitude) > 0.000_001 ||
                     abs(self.selectedMapCoordinate.longitude - coordinate.longitude) > 0.000_001 {
@@ -346,6 +361,7 @@ final class AppModel: ObservableObject {
                 try await self.session.prepare(endpoint: endpoint)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
                 self.activeCoordinate = coordinate
+                self.activeDeviceID = self.rsdDeviceID ?? selectedDeviceID
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
                 self.status = "移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
@@ -366,6 +382,7 @@ final class AppModel: ObservableObject {
             }
 
             do {
+                let selectedDeviceID = self.selectedDevice?.identifier
                 self.selectedMapCoordinate = CLLocationCoordinate2D(
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude
@@ -375,6 +392,7 @@ final class AppModel: ObservableObject {
                 try await self.session.prepare(endpoint: endpoint)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
                 self.activeCoordinate = coordinate
+                self.activeDeviceID = self.rsdDeviceID ?? selectedDeviceID
                 self.activeLocationMayRemain = false
                 self.status = "前回の移動先へ再移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
             } catch {
@@ -398,6 +416,7 @@ final class AppModel: ObservableObject {
                 self.rsdEndpoint = nil
                 self.rsdDeviceID = nil
                 self.activeCoordinate = nil
+                self.activeDeviceID = nil
                 self.activeLocationName = nil
                 self.activeLocationMayRemain = false
                 self.status = "移動を解除しました。iPhoneは通常の位置情報に戻ります。"
@@ -634,7 +653,8 @@ final class AppModel: ObservableObject {
     private func startAutoRecovery(issue: LocationContinuityIssue) {
         guard autoRecoveryTask == nil,
               let coordinate = activeCoordinate,
-              selectedDevice != nil,
+              let activeDeviceID,
+              selectedDevice?.identifier == activeDeviceID,
               !activeLocationMayRemain,
               !isBusy else {
             return
@@ -642,12 +662,23 @@ final class AppModel: ObservableObject {
 
         autoRecoveryGeneration += 1
         let recoveryGeneration = autoRecoveryGeneration
+        let deviceID = activeDeviceID
         autoRecoveryTask = Task { [weak self] in
-            await self?.runAutoRecovery(issue: issue, coordinate: coordinate, generation: recoveryGeneration)
+            await self?.runAutoRecovery(
+                issue: issue,
+                coordinate: coordinate,
+                deviceID: deviceID,
+                generation: recoveryGeneration
+            )
         }
     }
 
-    private func runAutoRecovery(issue: LocationContinuityIssue, coordinate: Coordinate, generation: Int) async {
+    private func runAutoRecovery(
+        issue: LocationContinuityIssue,
+        coordinate: Coordinate,
+        deviceID: String,
+        generation: Int
+    ) async {
         defer {
             if autoRecoveryGeneration == generation {
                 autoRecoveryTask = nil
@@ -655,7 +686,7 @@ final class AppModel: ObservableObject {
         }
 
         for attempt in autoRecoveryPolicy.attempts {
-            guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+            guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                 return
             }
 
@@ -663,7 +694,7 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
 
-            guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+            guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                 return
             }
 
@@ -671,48 +702,49 @@ final class AppModel: ObservableObject {
 
             do {
                 let endpoint = try await ensureTunnel(forceRestart: true) {
-                    self.canContinueAutoRecovery(coordinate: coordinate, generation: generation)
+                    self.canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation)
                 }
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 try await session.prepare(endpoint: endpoint)
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 try await session.setLocation(endpoint: endpoint, coordinate: coordinate)
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 activeCoordinate = coordinate
+                activeDeviceID = deviceID
                 activeLocationMayRemain = false
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 status = "自動再接続しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(startSleepPreventionStatus())"
                 return
             } catch {
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 rsdEndpoint = nil
                 rsdDeviceID = nil
                 let message = userFacingMessage(for: error)
                 if LocationAutoRecoveryErrorClassifier.isUserCancellation(message) {
-                    guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                         return
                     }
                     markActiveLocationUncertain(reason: message)
                     return
                 }
                 if attempt.number == autoRecoveryPolicy.maxAttempts {
-                    guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                         return
                     }
                     markActiveLocationUncertain(reason: uncertainReason(for: issue))
                     return
                 }
-                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
                     return
                 }
                 status = "\(autoRecoveryPolicy.progressText(for: attempt)) 失敗しました: \(message)"
@@ -720,10 +752,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func canContinueAutoRecovery(coordinate: Coordinate, generation: Int) -> Bool {
+    private func canContinueAutoRecovery(coordinate: Coordinate, deviceID: String, generation: Int) -> Bool {
         !Task.isCancelled &&
             autoRecoveryGeneration == generation &&
             activeCoordinate == coordinate &&
+            activeDeviceID == deviceID &&
+            selectedDevice?.identifier == deviceID &&
             !activeLocationMayRemain
     }
 
