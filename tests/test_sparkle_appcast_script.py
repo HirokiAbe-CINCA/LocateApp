@@ -1,6 +1,7 @@
 import base64
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -156,7 +157,7 @@ def test_verify_sparkle_keypair_accepts_matching_keys():
     }
 
     result = subprocess.run(
-        [os.environ.get("PYTHON", "python3"), str(KEYPAIR_SCRIPT)],
+        [sys.executable, str(KEYPAIR_SCRIPT)],
         env=env,
         text=True,
         capture_output=True,
@@ -173,7 +174,7 @@ def test_verify_sparkle_keypair_rejects_mismatched_keys():
     }
 
     result = subprocess.run(
-        [os.environ.get("PYTHON", "python3"), str(KEYPAIR_SCRIPT)],
+        [sys.executable, str(KEYPAIR_SCRIPT)],
         env=env,
         text=True,
         capture_output=True,
