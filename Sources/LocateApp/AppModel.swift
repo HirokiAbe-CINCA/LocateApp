@@ -60,10 +60,13 @@ final class AppModel: ObservableObject {
     private let searchService = LocationSearchService()
     private var searchRequestSerial = 0
     private var locationContinuityTask: Task<Void, Never>?
+    private let autoRecoveryPolicy = LocationAutoRecoveryPolicy()
+    private var autoRecoveryTask: Task<Void, Never>?
     private let powerEventObserverBag = PowerEventObserverBag()
 
     deinit {
         locationContinuityTask?.cancel()
+        autoRecoveryTask?.cancel()
     }
 
     var selectedDevice: DeviceInfo? {
@@ -352,6 +355,7 @@ final class AppModel: ObservableObject {
     }
 
     func reapplyActiveLocation() {
+        cancelAutoRecovery()
         runBusy("前回の移動先へ再移動しています...") {
             guard let coordinate = self.activeCoordinate else {
                 self.status = "再移動する前回の移動先がありません。"
@@ -379,6 +383,7 @@ final class AppModel: ObservableObject {
     }
 
     func resetLocation() {
+        cancelAutoRecovery()
         runBusy("移動を解除しています...") {
             try await self.session.stopSetProcess()
             self.stopSleepPrevention()
@@ -552,7 +557,8 @@ final class AppModel: ObservableObject {
     private func checkActiveLocationContinuity() async {
         guard activeCoordinate != nil,
               !activeLocationMayRemain,
-              !isBusy else {
+              !isBusy,
+              autoRecoveryTask == nil else {
             return
         }
 
@@ -565,18 +571,89 @@ final class AppModel: ObservableObject {
         switch assessment {
         case .active:
             break
-        case .uncertain(.tunnelClosed):
-            markActiveLocationUncertain(
-                reason: "iPhoneとの通信トンネルが切れました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
-            )
-        case .uncertain(.setProcessStopped):
-            markActiveLocationUncertain(
-                reason: "Mac側の位置設定プロセスが停止しました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
-            )
+        case .uncertain(let issue):
+            startAutoRecovery(issue: issue)
+        }
+    }
+
+    private func startAutoRecovery(issue: LocationContinuityIssue) {
+        guard autoRecoveryTask == nil,
+              let coordinate = activeCoordinate,
+              !activeLocationMayRemain,
+              !isBusy else {
+            return
+        }
+
+        autoRecoveryTask = Task { [weak self] in
+            await self?.runAutoRecovery(issue: issue, coordinate: coordinate)
+        }
+    }
+
+    private func runAutoRecovery(issue: LocationContinuityIssue, coordinate: Coordinate) async {
+        defer {
+            if !Task.isCancelled {
+                autoRecoveryTask = nil
+            }
+        }
+
+        for attempt in autoRecoveryPolicy.attempts {
+            guard !Task.isCancelled else {
+                return
+            }
+
+            if let delay = autoRecoveryPolicy.delayBeforeAttempt(attempt.number), delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+
+            guard !Task.isCancelled,
+                  activeCoordinate == coordinate,
+                  !activeLocationMayRemain else {
+                return
+            }
+
+            status = autoRecoveryPolicy.progressText(for: attempt)
+
+            do {
+                let endpoint = try await ensureTunnel(forceRestart: true)
+                try await session.prepare(endpoint: endpoint)
+                try await session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                activeCoordinate = coordinate
+                activeLocationMayRemain = false
+                status = "自動再接続しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(startSleepPreventionStatus())"
+                return
+            } catch {
+                rsdEndpoint = nil
+                rsdDeviceID = nil
+                let message = userFacingMessage(for: error)
+                if LocationAutoRecoveryErrorClassifier.isUserCancellation(message) {
+                    markActiveLocationUncertain(reason: message)
+                    return
+                }
+                if attempt.number == autoRecoveryPolicy.maxAttempts {
+                    markActiveLocationUncertain(reason: uncertainReason(for: issue))
+                    return
+                }
+                status = "\(autoRecoveryPolicy.progressText(for: attempt)) 失敗しました: \(message)"
+            }
+        }
+    }
+
+    private func cancelAutoRecovery() {
+        autoRecoveryTask?.cancel()
+        autoRecoveryTask = nil
+    }
+
+    private func uncertainReason(for issue: LocationContinuityIssue) -> String {
+        switch issue {
+        case .tunnelClosed:
+            return "iPhoneとの通信トンネルが切れました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+        case .setProcessStopped:
+            return "Mac側の位置設定プロセスが停止しました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
         }
     }
 
     private func markActiveLocationUncertain(reason: String) {
+        cancelAutoRecovery()
         guard activeCoordinate != nil else {
             return
         }
