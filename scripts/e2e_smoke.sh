@@ -86,8 +86,13 @@ tell application "System Events"
       if (count of text fields of group 2 of panel) is not 2 then
         error "Expected search and coordinate fields in destination group"
       end if
-      if (count of buttons of group 2 of panel) is not 3 then
-        error "Expected search, move, and reset actions in destination group"
+      set destinationButtonCount to count of buttons of group 2 of panel
+      set expectedDestinationButtonCount to 3
+      if (my textDump(group 2 of panel)) contains "前回の移動先の可能性" then
+        set expectedDestinationButtonCount to 4
+      end if
+      if destinationButtonCount is not expectedDestinationButtonCount then
+        error "Expected destination group to expose " & expectedDestinationButtonCount & " actions, got " & destinationButtonCount
       end if
 
       set focused of text field 2 of group 2 of panel to true
