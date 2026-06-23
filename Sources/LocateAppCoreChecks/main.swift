@@ -361,11 +361,11 @@ func runChecks() throws {
         "negative-numbered recovery attempts should not be allowed"
     )
     try check(
-        LaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
+        AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
         "launch update check should run when automatic checks are enabled"
     )
     try check(
-        !LaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: false),
+        !AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: false),
         "launch update check should not run when automatic checks are disabled"
     )
 

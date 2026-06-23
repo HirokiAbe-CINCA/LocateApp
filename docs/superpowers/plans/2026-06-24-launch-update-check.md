@@ -23,11 +23,11 @@ Add a helper check to `Sources/LocateAppCoreChecks/main.swift`:
 ```swift
 private func checkLaunchUpdateCheckPolicy() throws {
     try check(
-        LaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
+        AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
         "launch update check should run when automatic checks are enabled"
     )
     try check(
-        !LaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: false),
+        !AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: false),
         "launch update check should not run when automatic checks are disabled"
     )
 }
@@ -50,14 +50,16 @@ swiftc -I /tmp/LocateAppCoreChecksBuild -L /tmp/LocateAppCoreChecksBuild -lLocat
 DYLD_LIBRARY_PATH=/tmp/LocateAppCoreChecksBuild /tmp/LocateAppCoreChecksBuild/LocateAppCoreChecks
 ```
 
-Expected: compile failure because `LaunchUpdateCheckPolicy` is not defined.
+Expected: compile failure because `AppLaunchUpdateCheckPolicy` is not defined.
 
 - [ ] **Step 3: Add minimal policy implementation**
 
 Add to `Sources/LocateAppCore/LocationContinuity.swift`:
 
 ```swift
-public enum LaunchUpdateCheckPolicy {
+public struct AppLaunchUpdateCheckPolicy: Equatable, Sendable {
+    public init() {}
+
     public static func shouldCheckOnLaunch(automaticallyChecksForUpdates: Bool) -> Bool {
         automaticallyChecksForUpdates
     }
@@ -95,10 +97,10 @@ git commit -m "feat: add launch update check policy"
 Run this source check before changing `LocateApp.swift`:
 
 ```bash
-rg -n "checkForUpdatesInBackground|LaunchUpdateCheckPolicy" Sources/LocateApp/LocateApp.swift
+rg -n "checkForUpdatesInBackground|AppLaunchUpdateCheckPolicy" Sources/LocateApp/LocateApp.swift
 ```
 
-Expected: no matches for `checkForUpdatesInBackground` and no app-side reference to `LaunchUpdateCheckPolicy`.
+Expected: no matches for `checkForUpdatesInBackground` and no app-side reference to `AppLaunchUpdateCheckPolicy`.
 
 - [ ] **Step 2: Implement the launch check**
 
@@ -111,7 +113,7 @@ let controller = SPUStandardUpdaterController(
     userDriverDelegate: nil
 )
 updaterController = controller
-if LaunchUpdateCheckPolicy.shouldCheckOnLaunch(
+if AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(
     automaticallyChecksForUpdates: controller.updater.automaticallyChecksForUpdates
 ) {
     controller.updater.checkForUpdatesInBackground()
@@ -132,7 +134,7 @@ attention.
 Run:
 
 ```bash
-rg -n "checkForUpdatesInBackground|LaunchUpdateCheckPolicy" Sources/LocateApp/LocateApp.swift README.md
+rg -n "checkForUpdatesInBackground|AppLaunchUpdateCheckPolicy" Sources/LocateApp/LocateApp.swift README.md
 ```
 
 Expected: matches in `LocateApp.swift` and README.
@@ -157,10 +159,11 @@ public class SPUStandardUpdaterController {
     }
 }
 SWIFT
-swiftc -emit-module -module-name Sparkle /tmp/SparkleStub.swift -emit-module-path /tmp/Sparkle.swiftmodule
-rm -rf /tmp/LocateAppTypecheckBuild && mkdir -p /tmp/LocateAppTypecheckBuild
+rm -rf /tmp/LocateAppTypecheckBuild /tmp/LocateAppSparkleStubBuild /tmp/LocateAppModuleCache
+mkdir -p /tmp/LocateAppTypecheckBuild /tmp/LocateAppSparkleStubBuild /tmp/LocateAppModuleCache
+swiftc -swift-version 6 -emit-module -module-name Sparkle /tmp/SparkleStub.swift -emit-module-path /tmp/LocateAppSparkleStubBuild/Sparkle.swiftmodule -module-cache-path /tmp/LocateAppModuleCache
 swiftc -emit-module -module-name LocateAppCore Sources/LocateAppCore/LocationContinuity.swift Sources/LocateAppCore/SleepPrevention.swift Sources/LocateAppCore/LocateCore.swift Sources/LocateAppCore/LocateProcess.swift -emit-module-path /tmp/LocateAppTypecheckBuild/LocateAppCore.swiftmodule
-swiftc -swift-version 6 -typecheck -I /tmp -I /tmp/LocateAppTypecheckBuild Sources/LocateApp/LocateApp.swift Sources/LocateApp/AppModel.swift Sources/LocateApp/LocationSearchService.swift Sources/LocateApp/DevicePanel.swift Sources/LocateApp/MapPickerView.swift
+swiftc -swift-version 6 -typecheck -parse-as-library -module-name LocateAppManualTypecheck -I /tmp/LocateAppTypecheckBuild -I /tmp/LocateAppSparkleStubBuild -module-cache-path /tmp/LocateAppModuleCache Sources/LocateApp/LocateApp.swift Sources/LocateApp/AppModel.swift Sources/LocateApp/LocationSearchService.swift Sources/LocateApp/DevicePanel.swift Sources/LocateApp/MapPickerView.swift
 ```
 
 Expected: typecheck succeeds, aside from any pre-existing deprecation warnings.

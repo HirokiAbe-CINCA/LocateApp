@@ -26,7 +26,9 @@ public enum LocationReapplyPrompt {
     }
 }
 
-public enum LaunchUpdateCheckPolicy {
+public struct AppLaunchUpdateCheckPolicy: Equatable, Sendable {
+    public init() {}
+
     public static func shouldCheckOnLaunch(automaticallyChecksForUpdates: Bool) -> Bool {
         automaticallyChecksForUpdates
     }

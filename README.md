@@ -103,9 +103,10 @@ repo-local `.venv`.
 Download the latest `LocateApp-*-mac-arm64.dmg` or `.zip` from
 [GitHub Releases](https://github.com/HirokiAbe-CINCA/LocateApp/releases).
 Open the DMG or unzip the archive, then copy `LocateApp.app` to `/Applications`.
-Signed release builds use Sparkle for automatic in-app updates. Sparkle checks
-the published appcast feed and can download and install newer signed ZIP
-updates in the background when macOS allows it.
+Signed release builds use Sparkle for automatic in-app updates. On launch,
+LocateApp silently checks the published appcast feed and only surfaces Sparkle UI
+when an update needs attention. Sparkle can download and install newer signed
+ZIP updates in the background when macOS allows it.
 
 Current release builds are Developer ID signed and notarized, so macOS should
 allow normal first launch after copying `LocateApp.app` to `/Applications`.
