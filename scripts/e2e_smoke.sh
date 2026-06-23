@@ -74,6 +74,8 @@ tell application "System Events"
     my assertNotContains(visibleText, "よく使う場所")
     my assertNotContains(visibleText, "通信を準備")
     my assertNotContains(visibleText, "ログ")
+    my assertNotContains(visibleText, "自動再接続中です")
+    my assertNotContains(visibleText, "自動再接続しました")
 
     tell window 1
       set panel to scroll area 1 of group 1
