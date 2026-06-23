@@ -437,38 +437,63 @@ final class AppModel: ObservableObject {
         return selectedDevice
     }
 
-    private func ensureTunnel(forceRestart: Bool = false) async throws -> RSDEndpoint {
+    private func ensureTunnel(
+        forceRestart: Bool = false,
+        shouldContinue: (@MainActor () -> Bool)? = nil
+    ) async throws -> RSDEndpoint {
+        func checkContinuation() throws {
+            if let shouldContinue, !shouldContinue() {
+                throw CancellationError()
+            }
+        }
+
+        try checkContinuation()
         let selectedDevice = try await ensureSelectedDevice()
+        try checkContinuation()
 
         if !forceRestart,
            let rsdEndpoint,
-           rsdDeviceID == selectedDevice.identifier,
-           await session.isTunnelRunning() {
-            return rsdEndpoint
+           rsdDeviceID == selectedDevice.identifier {
+            let tunnelRunning = await session.isTunnelRunning()
+            try checkContinuation()
+            if tunnelRunning {
+                return rsdEndpoint
+            }
         }
+        try checkContinuation()
 
         if !forceRestart,
-           rsdDeviceID == selectedDevice.identifier,
-           await session.isTunnelRunning(),
-           let endpoint = try? await session.readTunnelEndpoint() {
-            rsdEndpoint = endpoint
-            return endpoint
+           rsdDeviceID == selectedDevice.identifier {
+            let tunnelRunning = await session.isTunnelRunning()
+            try checkContinuation()
+            if tunnelRunning, let endpoint = try? await session.readTunnelEndpoint() {
+                try checkContinuation()
+                rsdEndpoint = endpoint
+                return endpoint
+            }
         }
+        try checkContinuation()
 
         if forceRestart {
+            try checkContinuation()
             rsdEndpoint = nil
             rsdDeviceID = nil
         }
 
+        try checkContinuation()
         isPreparingConnection = true
         connectionFailureMessage = nil
         do {
+            try checkContinuation()
             status = "管理者認証が表示されたら承認してください。iPhone接続の準備に使います。"
             try await session.startTunnel(device: selectedDevice)
+            try checkContinuation()
             status = "iPhone接続の準備完了を待っています..."
 
             for _ in 0..<30 {
+                try checkContinuation()
                 if let endpoint = try? await session.readTunnelEndpoint() {
+                    try checkContinuation()
                     rsdEndpoint = endpoint
                     rsdDeviceID = selectedDevice.identifier
                     isPreparingConnection = false
@@ -476,13 +501,17 @@ final class AppModel: ObservableObject {
                     return endpoint
                 }
                 try await Task.sleep(nanoseconds: 500_000_000)
+                try checkContinuation()
             }
 
+            try checkContinuation()
             rsdEndpoint = nil
             rsdDeviceID = nil
             try? await session.stopTunnel()
+            try checkContinuation()
             throw LocateError.invalidRSDOutput("15秒以内にiPhone接続を準備できませんでした。iPhoneの接続・ロック解除・管理者認証の承認を確認して、もう一度試してください。急いで解除したい場合はiPhoneを再起動してください。")
         } catch {
+            try checkContinuation()
             isPreparingConnection = false
             connectionFailureMessage = userFacingMessage(for: error)
             throw error
@@ -581,6 +610,7 @@ final class AppModel: ObservableObject {
     private func startAutoRecovery(issue: LocationContinuityIssue) {
         guard autoRecoveryTask == nil,
               let coordinate = activeCoordinate,
+              selectedDevice != nil,
               !activeLocationMayRemain,
               !isBusy else {
             return
@@ -616,7 +646,9 @@ final class AppModel: ObservableObject {
             status = autoRecoveryPolicy.progressText(for: attempt)
 
             do {
-                let endpoint = try await ensureTunnel(forceRestart: true)
+                let endpoint = try await ensureTunnel(forceRestart: true) {
+                    self.canContinueAutoRecovery(coordinate: coordinate, generation: generation)
+                }
                 guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
                     return
                 }
