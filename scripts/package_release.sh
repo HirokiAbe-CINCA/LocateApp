@@ -17,7 +17,9 @@ NOTARY_WORK_DIR="$ROOT/build/notary-work"
 ARCHIVE_BASE="$APP_NAME-$VERSION-mac-arm64"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 NOTARIZE="${NOTARIZE:-auto}"
+REQUIRE_SPARKLE_APPCAST="${REQUIRE_SPARKLE_APPCAST:-0}"
 NOTARIZE_ACTIVE=0
+SPARKLE_APPCAST_ACTIVE=0
 NOTARY_KEY_PATH=""
 DMG_RW="$RELEASE_DIR/$ARCHIVE_BASE-rw.dmg"
 DMG_FINAL="$RELEASE_DIR/$ARCHIVE_BASE.dmg"
@@ -33,6 +35,14 @@ notary_secrets_ready() {
     [[ -n "${APPLE_NOTARY_KEY_ID:-}" ]] &&
     [[ -n "${APPLE_NOTARY_ISSUER_ID:-}" ]] &&
     { [[ -n "${APPLE_NOTARY_KEY_PATH:-}" ]] || [[ -n "${APPLE_NOTARY_KEY_P8_BASE64:-}" ]]; }
+}
+
+sparkle_secrets_ready() {
+  [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]] && [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]
+}
+
+verify_sparkle_keypair() {
+  "$ROOT/.venv/bin/python" "$ROOT/scripts/verify_sparkle_keypair.py"
 }
 
 case "$NOTARIZE" in
@@ -53,6 +63,19 @@ case "$NOTARIZE" in
     ;;
   *)
     echo "NOTARIZE must be auto, 1, or 0" >&2
+    exit 1
+    ;;
+esac
+
+case "$REQUIRE_SPARKLE_APPCAST" in
+  1|true|yes)
+    REQUIRE_SPARKLE_APPCAST=1
+    ;;
+  0|false|no)
+    REQUIRE_SPARKLE_APPCAST=0
+    ;;
+  *)
+    echo "REQUIRE_SPARKLE_APPCAST must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -190,10 +213,26 @@ APPLESCRIPT
 rm -rf "$RELEASE_DIR" "$DMG_STAGING_DIR" "$NOTARY_WORK_DIR"
 mkdir -p "$RELEASE_DIR" "$DMG_STAGING_DIR" "$NOTARY_WORK_DIR"
 
+if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" || -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+  if ! sparkle_secrets_ready; then
+    echo "Sparkle updates require both SPARKLE_PUBLIC_ED_KEY and SPARKLE_ED_PRIVATE_KEY." >&2
+    exit 1
+  fi
+  if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+    echo "Missing .venv/bin/python for Sparkle key verification." >&2
+    exit 1
+  fi
+  verify_sparkle_keypair
+  SPARKLE_APPCAST_ACTIVE=1
+elif [[ "$REQUIRE_SPARKLE_APPCAST" == "1" ]]; then
+  echo "REQUIRE_SPARKLE_APPCAST is enabled, but Sparkle key secrets are missing." >&2
+  exit 1
+fi
+
 if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
   command -v xcrun >/dev/null
   command -v python3 >/dev/null
-  if [[ -z "${SPARKLE_PUBLIC_ED_KEY:-}" || -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+  if [[ "$SPARKLE_APPCAST_ACTIVE" != "1" ]]; then
     echo "Notarized releases require SPARKLE_PUBLIC_ED_KEY and SPARKLE_ED_PRIVATE_KEY for Sparkle updates." >&2
     exit 1
   fi
@@ -266,8 +305,12 @@ cat > "$RELEASE_DIR/RELEASE_NOTES.md" <<NOTES
 $NOTARIZATION_NOTE
 NOTES
 
-if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
+if [[ "$SPARKLE_APPCAST_ACTIVE" == "1" ]]; then
   VERSION="$VERSION" RELEASE_DIR="$RELEASE_DIR" "$ROOT/scripts/generate_sparkle_appcast.sh"
+fi
+if [[ "$REQUIRE_SPARKLE_APPCAST" == "1" && ! -f "$RELEASE_DIR/appcast.xml" ]]; then
+  echo "Required Sparkle appcast was not generated." >&2
+  exit 1
 fi
 
 (

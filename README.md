@@ -118,19 +118,17 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The Release workflow uploads the styled DMG, ZIP, `SHA256SUMS.txt`, and, when
-Developer ID and Sparkle signing secrets are configured, `appcast.xml`. The
-appcast is also deployed to GitHub Pages for Sparkle:
+The Release workflow uploads the styled DMG, ZIP, `SHA256SUMS.txt`, and
+`appcast.xml`. The appcast is also deployed to GitHub Pages for Sparkle:
 
 ```text
 https://hirokiabe-cinca.github.io/LocateApp/appcast.xml
 ```
 
-Developer ID signing and notarization run in GitHub Actions when Apple secrets
-are set. Sparkle appcast generation additionally requires Sparkle EdDSA key
-secrets. See `docs/notarization.md` for the required account steps and secret
-names. Without those secrets, release builds fall back to ad-hoc signing and do
-not publish an automatic-update feed.
+GitHub tag releases require Apple Developer ID/notarization secrets and Sparkle
+EdDSA key secrets. They fail if notarization or automatic-update appcast
+generation cannot complete. See `docs/notarization.md` for the required account
+steps and secret names.
 
 ## Cleanup
 

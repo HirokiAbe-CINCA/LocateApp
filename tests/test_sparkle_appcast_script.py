@@ -1,10 +1,15 @@
+import base64
 import os
 import subprocess
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "generate_sparkle_appcast.sh"
+KEYPAIR_SCRIPT = ROOT / "scripts" / "verify_sparkle_keypair.py"
 
 
 def test_generate_sparkle_appcast_uses_stdin_key_and_release_zip(tmp_path):
@@ -131,3 +136,48 @@ touch {marker}
     assert "Sparkle tools checksum mismatch" in result.stderr
     assert not marker.exists()
     assert not (release_dir / "appcast.xml").exists()
+
+
+def test_verify_sparkle_keypair_accepts_matching_keys():
+    private_key = Ed25519PrivateKey.generate()
+    private_seed = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    env = {
+        **os.environ,
+        "SPARKLE_ED_PRIVATE_KEY": base64.b64encode(private_seed).decode(),
+        "SPARKLE_PUBLIC_ED_KEY": base64.b64encode(public_key).decode(),
+    }
+
+    result = subprocess.run(
+        [os.environ.get("PYTHON", "python3"), str(KEYPAIR_SCRIPT)],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_sparkle_keypair_rejects_mismatched_keys():
+    env = {
+        **os.environ,
+        "SPARKLE_ED_PRIVATE_KEY": base64.b64encode(b"\x01" * 32).decode(),
+        "SPARKLE_PUBLIC_ED_KEY": base64.b64encode(b"\x02" * 32).decode(),
+    }
+
+    result = subprocess.run(
+        [os.environ.get("PYTHON", "python3"), str(KEYPAIR_SCRIPT)],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "does not match" in result.stderr

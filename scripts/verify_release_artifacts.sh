@@ -17,6 +17,7 @@ SUMS="$RELEASE_DIR/SHA256SUMS.txt"
 APPCAST="$RELEASE_DIR/appcast.xml"
 EXPECT_NOTARIZED="${EXPECT_NOTARIZED:-0}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://hirokiabe-cinca.github.io/LocateApp/appcast.xml}"
+REQUIRE_SPARKLE_APPCAST="${REQUIRE_SPARKLE_APPCAST:-0}"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -99,6 +100,15 @@ verify_sparkle_plist() {
     echo "SUAutomaticallyUpdate must be true" >&2
     exit 1
   fi
+  if [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+    if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+      echo "Missing .venv/bin/python for Sparkle key verification." >&2
+      exit 1
+    fi
+    SPARKLE_PUBLIC_ED_KEY="$public_key" \
+      SPARKLE_ED_PRIVATE_KEY="$SPARKLE_ED_PRIVATE_KEY" \
+      "$ROOT/.venv/bin/python" "$ROOT/scripts/verify_sparkle_keypair.py"
+  fi
 }
 
 verify_appcast() {
@@ -144,6 +154,9 @@ PY
 require_file "$ZIP"
 require_file "$DMG"
 require_file "$SUMS"
+if [[ "$REQUIRE_SPARKLE_APPCAST" == "1" ]]; then
+  require_file "$APPCAST"
+fi
 
 (
   cd "$RELEASE_DIR"

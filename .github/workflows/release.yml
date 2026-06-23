@@ -35,7 +35,7 @@ jobs:
           .venv/bin/python -m pytest
           swift run LocateAppCoreChecks
           swift build
-          python -m py_compile scripts/generate_app_icon.py scripts/generate_dmg_background.py
+          python -m py_compile scripts/generate_app_icon.py scripts/generate_dmg_background.py scripts/verify_sparkle_keypair.py
           bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/import_apple_certificate.sh scripts/package_release.sh scripts/verify_release_artifacts.sh scripts/generate_sparkle_appcast.sh
 
       - name: Prepare Apple signing certificate
@@ -64,7 +64,7 @@ jobs:
                 -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
             export SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY"
           fi
-          NOTARIZE=auto VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
+          REQUIRE_SPARKLE_APPCAST=1 NOTARIZE=1 VERSION="${GITHUB_REF_NAME#v}" ./scripts/package_release.sh
 
       - name: Verify release artifacts
         env:
@@ -75,18 +75,9 @@ jobs:
           APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
-          if [[ -n "${APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64:-}" &&
-                -n "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" &&
-                -n "${APPLE_KEYCHAIN_PASSWORD:-}" &&
-                -n "${APPLE_SIGNING_IDENTITY:-}" &&
-                -n "${APPLE_NOTARY_KEY_P8_BASE64:-}" &&
-                -n "${APPLE_NOTARY_KEY_ID:-}" &&
-                -n "${APPLE_NOTARY_ISSUER_ID:-}" ]]; then
-            EXPECT_NOTARIZED=1 VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
-          else
-            VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
-          fi
+          REQUIRE_SPARKLE_APPCAST=1 EXPECT_NOTARIZED=1 VERSION="${GITHUB_REF_NAME#v}" ./scripts/verify_release_artifacts.sh
 
       - name: Publish GitHub Release
         env:

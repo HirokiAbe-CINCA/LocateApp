@@ -67,6 +67,8 @@ Generate Sparkle keys from a trusted Mac with the Sparkle distribution tools:
 Store the printed public key as `SPARKLE_PUBLIC_ED_KEY`. Store the exact
 contents of `sparkle-ed25519-private-key.txt` as `SPARKLE_ED_PRIVATE_KEY`.
 Never commit the private key or paste it into issues, PRs, chat, or logs.
+CI derives the public key from `SPARKLE_ED_PRIVATE_KEY` and fails the release
+if it does not match the public key embedded in the app.
 
 ## Release Behavior
 
@@ -85,6 +87,7 @@ https://hirokiabe-cinca.github.io/LocateApp/appcast.xml
 The release workflow uploads `appcast.xml` to the GitHub Release for audit and
 deploys the same file to GitHub Pages after the Release assets are available.
 
-When the secrets are absent, the workflow keeps producing ad-hoc signed ZIP and
-DMG artifacts. That fallback keeps local and CI release checks usable while the
-Apple account setup is pending. It does not publish Sparkle automatic updates.
+Tag releases require the Apple signing/notarization secrets and Sparkle secrets.
+They fail if notarization or appcast generation cannot complete. Local manual
+packaging can still be run without those secrets, but those artifacts are not
+suitable for the automatic-update release channel.
