@@ -7,6 +7,7 @@ EXECUTABLE="$APP/Contents/MacOS/LocateApp"
 CONFIGURATION="${CONFIGURATION:-debug}"
 BUNDLE_HELPER="${BUNDLE_HELPER:-0}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${APPLE_SIGNING_IDENTITY:--}}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://hirokiabe-cinca.github.io/LocateApp/appcast.xml}"
 if [[ -z "$SIGNING_IDENTITY" ]]; then
   SIGNING_IDENTITY="-"
 fi
@@ -50,6 +51,38 @@ sign_nested_macho_files() {
   done < <(find "$resources" -type f \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0)
 }
 
+find_sparkle_framework() {
+  local candidate
+  local fallback=""
+
+  while IFS= read -r -d '' candidate; do
+    [[ -x "$candidate/Sparkle" ]] || continue
+    if [[ "$candidate" == *"/macos-"* ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+    if [[ -z "$fallback" ]]; then
+      fallback="$candidate"
+    fi
+  done < <(find "$ROOT/.build" -type d -name 'Sparkle.framework' -print0)
+
+  if [[ -n "$fallback" ]]; then
+    printf '%s\n' "$fallback"
+    return
+  fi
+
+  echo "Sparkle.framework was not found in SwiftPM build artifacts" >&2
+  exit 1
+}
+
+copy_sparkle_framework() {
+  local source="$1"
+  local destination="$APP/Contents/Frameworks/Sparkle.framework"
+
+  rm -rf "$destination"
+  ditto "$source" "$destination"
+}
+
 cd "$ROOT"
 
 if [[ ! -x "$ROOT/.venv/bin/pymobiledevice3" ]]; then
@@ -80,10 +113,12 @@ esac
 echo "Building $CONFIGURATION app bundle..."
 swift build -c "$CONFIGURATION" --product LocateApp
 BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+SPARKLE_FRAMEWORK="$(find_sparkle_framework)"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/LocateApp" "$EXECUTABLE"
+copy_sparkle_framework "$SPARKLE_FRAMEWORK"
 
 "$ROOT/.venv/bin/python" "$ROOT/scripts/generate_app_icon.py" \
   --output "$APP/Contents/Resources/AppIcon.icns" \
@@ -137,10 +172,20 @@ PLIST
 perl -0pi -e "s/__APP_VERSION__/$APP_VERSION/g" "$APP/Contents/Info.plist"
 perl -0pi -e "s/__APP_BUILD__/$APP_BUILD/g" "$APP/Contents/Info.plist"
 
+if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
+  plutil -insert SUFeedURL -string "$SPARKLE_FEED_URL" "$APP/Contents/Info.plist"
+  plutil -insert SUPublicEDKey -string "$SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
+  plutil -insert SUEnableAutomaticChecks -bool true "$APP/Contents/Info.plist"
+  plutil -insert SUAutomaticallyUpdate -bool true "$APP/Contents/Info.plist"
+else
+  echo "SPARKLE_PUBLIC_ED_KEY is unset; building without Sparkle update feed configuration."
+fi
+
 plutil -lint "$APP/Contents/Info.plist"
 if is_developer_id_signing; then
   sign_nested_macho_files
 fi
+sign_target "$APP/Contents/Frameworks/Sparkle.framework"
 sign_target "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 

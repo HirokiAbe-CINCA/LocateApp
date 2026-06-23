@@ -12,11 +12,17 @@ let package = Package(
         .executable(name: "LocateApp", targets: ["LocateApp"]),
         .executable(name: "LocateAppCoreChecks", targets: ["LocateAppCoreChecks"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.3")
+    ],
     targets: [
         .target(name: "LocateAppCore"),
         .executableTarget(
             name: "LocateApp",
-            dependencies: ["LocateAppCore"]
+            dependencies: [
+                "LocateAppCore",
+                .product(name: "Sparkle", package: "Sparkle")
+            ]
         ),
         .executableTarget(
             name: "LocateAppCoreChecks",

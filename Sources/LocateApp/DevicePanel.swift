@@ -17,7 +17,6 @@ struct DevicePanel: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    updateBanner
                     connectionSection
                     destinationSection
                 }
@@ -59,38 +58,6 @@ struct DevicePanel: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .background(.bar)
-        }
-    }
-
-    @ViewBuilder
-    private var updateBanner: some View {
-        if let availableUpdate = model.availableUpdate {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.blue)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("アップデートがあります")
-                        .font(.headline)
-                    Text("v\(availableUpdate.version)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    model.openAvailableUpdate()
-                } label: {
-                    Label("アップデート", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityLabel("アップデートをダウンロード")
-            }
-            .padding(12)
-            .background(.blue.opacity(0.11), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 

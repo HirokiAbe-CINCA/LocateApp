@@ -27,11 +27,15 @@ verify_app() {
   local app="$1"
   local helper="$app/Contents/Resources/pymobiledevice3-helper/pymobiledevice3-helper"
   local icon="$app/Contents/Resources/AppIcon.icns"
+  local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
+  local sparkle_executable="$sparkle_framework/Sparkle"
   local version
 
   test -x "$app/Contents/MacOS/LocateApp"
   test -x "$helper"
   test -f "$icon"
+  test -x "$sparkle_executable"
+  codesign --verify --strict --verbose=2 "$sparkle_framework"
   codesign --verify --deep --strict --verbose=2 "$app"
   if [[ "$EXPECT_NOTARIZED" == "1" ]]; then
     xcrun stapler validate "$app"
