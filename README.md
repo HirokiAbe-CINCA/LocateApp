@@ -62,11 +62,14 @@ putting the Mac to sleep, quitting the app, shutting down the Mac, or restarting
 the iPhone can clear the simulated location.
 
 LocateApp monitors the stored tunnel and set-location process while a moved
-location is active. If the Mac sleeps/wakes, the tunnel closes, or the helper
-process stops, the app marks the current movement as uncertain instead of
-continuing to present it as definitely active. When that happens, reconnect and
-unlock the iPhone, then use `前回の場所へ再移動` to rebuild the developer
-connection and apply the previous coordinate again.
+location is active. If the tunnel closes or the helper process stops, the app
+automatically tries to rebuild the developer connection and reapply the previous
+coordinate up to three times, waiting 10 seconds between retries. If recovery
+succeeds, the moved location remains active. If recovery fails or administrator
+authorization is canceled, the app marks the current movement as uncertain
+instead of continuing to present it as definitely active. When that happens,
+reconnect and unlock the iPhone, then use `前回の場所へ再移動` to rebuild the
+developer connection and apply the previous coordinate again.
 
 `移動を解除` terminates the stored set-location process and sends the DVT
 clear-location command through a recovered tunnel when needed. If the iPhone is

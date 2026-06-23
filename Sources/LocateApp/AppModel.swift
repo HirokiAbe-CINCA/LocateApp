@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
     @Published var selectedLocationName: String?
     @Published var activeLocationName: String?
     @Published var isPreventingSleep = false
+    private var activeDeviceID: String?
     private var rsdDeviceID: String?
     @Published private var isPreparingConnection = false
     @Published private var connectionFailureMessage: String?
@@ -60,10 +61,15 @@ final class AppModel: ObservableObject {
     private let searchService = LocationSearchService()
     private var searchRequestSerial = 0
     private var locationContinuityTask: Task<Void, Never>?
+    private let autoRecoveryPolicy = LocationAutoRecoveryPolicy()
+    private var autoRecoveryTask: Task<Void, Never>?
+    private var autoRecoveryGeneration = 0
+    private var tunnelPreparationGeneration = 0
     private let powerEventObserverBag = PowerEventObserverBag()
 
     deinit {
         locationContinuityTask?.cancel()
+        autoRecoveryTask?.cancel()
     }
 
     var selectedDevice: DeviceInfo? {
@@ -200,11 +206,23 @@ final class AppModel: ObservableObject {
     }
 
     func selectDevice(_ identifier: String) {
+        let selectionChanged = selectedDeviceID != identifier
+        if selectionChanged {
+            cancelAutoRecovery()
+        }
         selectedDeviceID = identifier
         connectionFailureMessage = nil
         if rsdDeviceID != identifier {
             rsdEndpoint = nil
             rsdDeviceID = nil
+        }
+        if selectionChanged,
+           activeCoordinate != nil,
+           let activeDeviceID,
+           activeDeviceID != identifier {
+            markActiveLocationUncertain(
+                reason: "対象iPhoneが変更されたため、自動再接続を停止しました。必要なiPhoneを選び直して「前回の場所へ再移動」を選んでください。"
+            )
         }
     }
 
@@ -297,6 +315,7 @@ final class AppModel: ObservableObject {
         Task {
             if let coordinate = try? await session.readActiveCoordinate() {
                 activeCoordinate = coordinate
+                activeDeviceID = nil
                 activeLocationMayRemain = true
                 status = "前回の移動先が残っている可能性があります。iPhoneを接続・ロック解除して「前回の場所へ再移動」または「移動を解除」を選んでください。"
             }
@@ -325,9 +344,11 @@ final class AppModel: ObservableObject {
     }
 
     func moveToSelectedLocation() {
+        cancelAutoRecovery()
         runBusy("iPhoneの場所を移動しています...") {
             do {
                 let coordinate = try Coordinate.parsePair(self.coordinateInputText)
+                let operationDeviceID = try self.targetDeviceIDForCurrentOperation()
                 if abs(self.selectedMapCoordinate.latitude - coordinate.latitude) > 0.000_001 ||
                     abs(self.selectedMapCoordinate.longitude - coordinate.longitude) > 0.000_001 {
                     self.selectedLocationName = nil
@@ -337,9 +358,13 @@ final class AppModel: ObservableObject {
                     longitude: coordinate.longitude
                 )
                 let endpoint = try await self.ensureTunnel()
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.prepare(endpoint: endpoint)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 self.activeCoordinate = coordinate
+                self.activeDeviceID = operationDeviceID
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
                 self.status = "移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
@@ -352,6 +377,7 @@ final class AppModel: ObservableObject {
     }
 
     func reapplyActiveLocation() {
+        cancelAutoRecovery()
         runBusy("前回の移動先へ再移動しています...") {
             guard let coordinate = self.activeCoordinate else {
                 self.status = "再移動する前回の移動先がありません。"
@@ -359,15 +385,21 @@ final class AppModel: ObservableObject {
             }
 
             do {
+                let operationDevice = try await self.ensureSelectedDevice()
+                let operationDeviceID = operationDevice.identifier
                 self.selectedMapCoordinate = CLLocationCoordinate2D(
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude
                 )
                 self.coordinateInputText = "\(coordinate.latitudeText), \(coordinate.longitudeText)"
                 let endpoint = try await self.ensureTunnel(forceRestart: true)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.prepare(endpoint: endpoint)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 self.activeCoordinate = coordinate
+                self.activeDeviceID = operationDeviceID
                 self.activeLocationMayRemain = false
                 self.status = "前回の移動先へ再移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
             } catch {
@@ -379,6 +411,7 @@ final class AppModel: ObservableObject {
     }
 
     func resetLocation() {
+        cancelAutoRecovery()
         runBusy("移動を解除しています...") {
             try await self.session.stopSetProcess()
             self.stopSleepPrevention()
@@ -390,6 +423,7 @@ final class AppModel: ObservableObject {
                 self.rsdEndpoint = nil
                 self.rsdDeviceID = nil
                 self.activeCoordinate = nil
+                self.activeDeviceID = nil
                 self.activeLocationName = nil
                 self.activeLocationMayRemain = false
                 self.status = "移動を解除しました。iPhoneは通常の位置情報に戻ります。"
@@ -430,55 +464,120 @@ final class AppModel: ObservableObject {
         return selectedDevice
     }
 
-    private func ensureTunnel(forceRestart: Bool = false) async throws -> RSDEndpoint {
+    private func targetDeviceIDForCurrentOperation() throws -> String {
+        guard let identifier = selectedDevice?.identifier else {
+            throw LocateError.invalidDeviceList("iPhoneが見つかりません。ケーブル接続、ロック解除、信頼設定を確認してから再試行してください。")
+        }
+        return identifier
+    }
+
+    private func ensureSelectedDeviceStillMatches(_ identifier: String) throws {
+        guard selectedDevice?.identifier == identifier else {
+            throw LocateError.invalidDeviceList("対象iPhoneが変更されたため、移動を確定できませんでした。必要なiPhoneを選び直して「前回の場所へ再移動」を選んでください。")
+        }
+    }
+
+    private func ensureTunnel(
+        forceRestart: Bool = false,
+        shouldContinue: (@MainActor () -> Bool)? = nil
+    ) async throws -> RSDEndpoint {
+        func checkContinuation() throws {
+            if let shouldContinue, !shouldContinue() {
+                throw CancellationError()
+            }
+        }
+
+        try checkContinuation()
         let selectedDevice = try await ensureSelectedDevice()
+        try checkContinuation()
 
         if !forceRestart,
            let rsdEndpoint,
-           rsdDeviceID == selectedDevice.identifier,
-           await session.isTunnelRunning() {
-            return rsdEndpoint
+           rsdDeviceID == selectedDevice.identifier {
+            let tunnelRunning = await session.isTunnelRunning()
+            try checkContinuation()
+            if tunnelRunning {
+                return rsdEndpoint
+            }
         }
+        try checkContinuation()
 
         if !forceRestart,
-           rsdDeviceID == selectedDevice.identifier,
-           await session.isTunnelRunning(),
-           let endpoint = try? await session.readTunnelEndpoint() {
-            rsdEndpoint = endpoint
-            return endpoint
+           rsdDeviceID == selectedDevice.identifier {
+            let tunnelRunning = await session.isTunnelRunning()
+            try checkContinuation()
+            if tunnelRunning, let endpoint = try? await session.readTunnelEndpoint() {
+                try checkContinuation()
+                rsdEndpoint = endpoint
+                return endpoint
+            }
         }
+        try checkContinuation()
 
         if forceRestart {
+            try checkContinuation()
             rsdEndpoint = nil
             rsdDeviceID = nil
         }
 
-        isPreparingConnection = true
-        connectionFailureMessage = nil
+        try checkContinuation()
+        let tunnelPreparationGeneration = beginTunnelPreparation()
         do {
+            try checkContinuation()
             status = "管理者認証が表示されたら承認してください。iPhone接続の準備に使います。"
             try await session.startTunnel(device: selectedDevice)
+            try checkContinuation()
             status = "iPhone接続の準備完了を待っています..."
 
             for _ in 0..<30 {
+                try checkContinuation()
                 if let endpoint = try? await session.readTunnelEndpoint() {
+                    try checkContinuation()
                     rsdEndpoint = endpoint
                     rsdDeviceID = selectedDevice.identifier
-                    isPreparingConnection = false
-                    connectionFailureMessage = nil
+                    endTunnelPreparation(tunnelPreparationGeneration)
+                    if self.tunnelPreparationGeneration == tunnelPreparationGeneration {
+                        connectionFailureMessage = nil
+                    }
                     return endpoint
                 }
                 try await Task.sleep(nanoseconds: 500_000_000)
+                try checkContinuation()
             }
 
+            try checkContinuation()
             rsdEndpoint = nil
             rsdDeviceID = nil
             try? await session.stopTunnel()
+            try checkContinuation()
             throw LocateError.invalidRSDOutput("15秒以内にiPhone接続を準備できませんでした。iPhoneの接続・ロック解除・管理者認証の承認を確認して、もう一度試してください。急いで解除したい場合はiPhoneを再起動してください。")
         } catch {
+            if let shouldContinue, !shouldContinue() {
+                endTunnelPreparation(tunnelPreparationGeneration)
+                throw CancellationError()
+            }
+            failTunnelPreparation(tunnelPreparationGeneration, error: error)
+            throw error
+        }
+    }
+
+    private func beginTunnelPreparation() -> Int {
+        tunnelPreparationGeneration += 1
+        isPreparingConnection = true
+        connectionFailureMessage = nil
+        return tunnelPreparationGeneration
+    }
+
+    private func endTunnelPreparation(_ generation: Int) {
+        if tunnelPreparationGeneration == generation {
+            isPreparingConnection = false
+        }
+    }
+
+    private func failTunnelPreparation(_ generation: Int, error: Error) {
+        if tunnelPreparationGeneration == generation {
             isPreparingConnection = false
             connectionFailureMessage = userFacingMessage(for: error)
-            throw error
         }
     }
 
@@ -552,7 +651,8 @@ final class AppModel: ObservableObject {
     private func checkActiveLocationContinuity() async {
         guard activeCoordinate != nil,
               !activeLocationMayRemain,
-              !isBusy else {
+              !isBusy,
+              autoRecoveryTask == nil else {
             return
         }
 
@@ -565,18 +665,139 @@ final class AppModel: ObservableObject {
         switch assessment {
         case .active:
             break
-        case .uncertain(.tunnelClosed):
-            markActiveLocationUncertain(
-                reason: "iPhoneとの通信トンネルが切れました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
-            )
-        case .uncertain(.setProcessStopped):
-            markActiveLocationUncertain(
-                reason: "Mac側の位置設定プロセスが停止しました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+        case .uncertain(let issue):
+            startAutoRecovery(issue: issue)
+        }
+    }
+
+    private func startAutoRecovery(issue: LocationContinuityIssue) {
+        guard autoRecoveryTask == nil,
+              let coordinate = activeCoordinate,
+              let activeDeviceID,
+              selectedDevice?.identifier == activeDeviceID,
+              !activeLocationMayRemain,
+              !isBusy else {
+            return
+        }
+
+        autoRecoveryGeneration += 1
+        let recoveryGeneration = autoRecoveryGeneration
+        let deviceID = activeDeviceID
+        autoRecoveryTask = Task { [weak self] in
+            await self?.runAutoRecovery(
+                issue: issue,
+                coordinate: coordinate,
+                deviceID: deviceID,
+                generation: recoveryGeneration
             )
         }
     }
 
+    private func runAutoRecovery(
+        issue: LocationContinuityIssue,
+        coordinate: Coordinate,
+        deviceID: String,
+        generation: Int
+    ) async {
+        defer {
+            if autoRecoveryGeneration == generation {
+                autoRecoveryTask = nil
+            }
+        }
+
+        for attempt in autoRecoveryPolicy.attempts {
+            guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                return
+            }
+
+            if let delay = autoRecoveryPolicy.delayBeforeAttempt(attempt.number), delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+
+            guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                return
+            }
+
+            status = autoRecoveryPolicy.progressText(for: attempt)
+
+            do {
+                let endpoint = try await ensureTunnel(forceRestart: true) {
+                    self.canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation)
+                }
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                try await session.prepare(endpoint: endpoint)
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                try await session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                activeCoordinate = coordinate
+                activeDeviceID = deviceID
+                activeLocationMayRemain = false
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                status = "自動再接続しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(startSleepPreventionStatus())"
+                return
+            } catch {
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                rsdEndpoint = nil
+                rsdDeviceID = nil
+                let message = userFacingMessage(for: error)
+                if LocationAutoRecoveryErrorClassifier.isUserCancellation(message) {
+                    guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                        return
+                    }
+                    markActiveLocationUncertain(reason: message)
+                    return
+                }
+                if attempt.number == autoRecoveryPolicy.maxAttempts {
+                    guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                        return
+                    }
+                    markActiveLocationUncertain(reason: uncertainReason(for: issue))
+                    return
+                }
+                guard canContinueAutoRecovery(coordinate: coordinate, deviceID: deviceID, generation: generation) else {
+                    return
+                }
+                status = "\(autoRecoveryPolicy.progressText(for: attempt)) 失敗しました: \(message)"
+            }
+        }
+    }
+
+    private func canContinueAutoRecovery(coordinate: Coordinate, deviceID: String, generation: Int) -> Bool {
+        !Task.isCancelled &&
+            autoRecoveryGeneration == generation &&
+            activeCoordinate == coordinate &&
+            activeDeviceID == deviceID &&
+            selectedDevice?.identifier == deviceID &&
+            !activeLocationMayRemain
+    }
+
+    private func cancelAutoRecovery() {
+        autoRecoveryGeneration += 1
+        autoRecoveryTask?.cancel()
+        autoRecoveryTask = nil
+    }
+
+    private func uncertainReason(for issue: LocationContinuityIssue) -> String {
+        switch issue {
+        case .tunnelClosed:
+            return "iPhoneとの通信トンネルが切れました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+        case .setProcessStopped:
+            return "Mac側の位置設定プロセスが停止しました。位置情報がすでに解除されている可能性があります。iPhone接続後に「前回の場所へ再移動」または「移動を解除」を選んでください。"
+        }
+    }
+
     private func markActiveLocationUncertain(reason: String) {
+        cancelAutoRecovery()
         guard activeCoordinate != nil else {
             return
         }
