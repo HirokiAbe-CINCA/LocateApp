@@ -347,8 +347,8 @@ final class AppModel: ObservableObject {
         cancelAutoRecovery()
         runBusy("iPhoneの場所を移動しています...") {
             do {
-                let selectedDeviceID = self.selectedDevice?.identifier
                 let coordinate = try Coordinate.parsePair(self.coordinateInputText)
+                let operationDeviceID = try self.targetDeviceIDForCurrentOperation()
                 if abs(self.selectedMapCoordinate.latitude - coordinate.latitude) > 0.000_001 ||
                     abs(self.selectedMapCoordinate.longitude - coordinate.longitude) > 0.000_001 {
                     self.selectedLocationName = nil
@@ -358,10 +358,13 @@ final class AppModel: ObservableObject {
                     longitude: coordinate.longitude
                 )
                 let endpoint = try await self.ensureTunnel()
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.prepare(endpoint: endpoint)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 self.activeCoordinate = coordinate
-                self.activeDeviceID = self.rsdDeviceID ?? selectedDeviceID
+                self.activeDeviceID = operationDeviceID
                 self.activeLocationName = self.selectedLocationName
                 self.activeLocationMayRemain = false
                 self.status = "移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
@@ -382,17 +385,20 @@ final class AppModel: ObservableObject {
             }
 
             do {
-                let selectedDeviceID = self.selectedDevice?.identifier
+                let operationDeviceID = try self.targetDeviceIDForCurrentOperation()
                 self.selectedMapCoordinate = CLLocationCoordinate2D(
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude
                 )
                 self.coordinateInputText = "\(coordinate.latitudeText), \(coordinate.longitudeText)"
                 let endpoint = try await self.ensureTunnel(forceRestart: true)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.prepare(endpoint: endpoint)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 try await self.session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                try self.ensureSelectedDeviceStillMatches(operationDeviceID)
                 self.activeCoordinate = coordinate
-                self.activeDeviceID = self.rsdDeviceID ?? selectedDeviceID
+                self.activeDeviceID = operationDeviceID
                 self.activeLocationMayRemain = false
                 self.status = "前回の移動先へ再移動しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(self.startSleepPreventionStatus())"
             } catch {
@@ -455,6 +461,19 @@ final class AppModel: ObservableObject {
             throw LocateError.invalidDeviceList("iPhoneが見つかりません。ケーブル接続、ロック解除、信頼設定を確認してから再試行してください。")
         }
         return selectedDevice
+    }
+
+    private func targetDeviceIDForCurrentOperation() throws -> String {
+        guard let identifier = selectedDevice?.identifier else {
+            throw LocateError.invalidDeviceList("iPhoneが見つかりません。ケーブル接続、ロック解除、信頼設定を確認してから再試行してください。")
+        }
+        return identifier
+    }
+
+    private func ensureSelectedDeviceStillMatches(_ identifier: String) throws {
+        guard selectedDevice?.identifier == identifier else {
+            throw LocateError.invalidDeviceList("対象iPhoneが変更されたため、移動を確定できませんでした。必要なiPhoneを選び直して「前回の場所へ再移動」を選んでください。")
+        }
     }
 
     private func ensureTunnel(

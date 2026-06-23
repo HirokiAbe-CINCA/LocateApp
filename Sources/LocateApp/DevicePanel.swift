@@ -91,6 +91,7 @@ struct DevicePanel: View {
                                 .tag(device.identifier)
                         }
                     }
+                    .disabled(model.isBusy)
                 }
 
                 HStack(spacing: 8) {
