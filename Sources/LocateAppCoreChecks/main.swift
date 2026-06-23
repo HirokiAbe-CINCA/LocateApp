@@ -360,6 +360,14 @@ func runChecks() throws {
         recoveryPolicy.delayBeforeAttempt(-1) == nil,
         "negative-numbered recovery attempts should not be allowed"
     )
+    try check(
+        AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
+        "launch update check should run when automatic checks are enabled"
+    )
+    try check(
+        !AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: false),
+        "launch update check should not run when automatic checks are disabled"
+    )
 
     let parsedPID = try PIDFile.parse("1234\n")
     try check(parsedPID == 1234, "pid parse mismatch")

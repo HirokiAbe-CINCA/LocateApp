@@ -26,6 +26,14 @@ public enum LocationReapplyPrompt {
     }
 }
 
+public struct AppLaunchUpdateCheckPolicy: Equatable, Sendable {
+    public init() {}
+
+    public static func shouldCheckOnLaunch(automaticallyChecksForUpdates: Bool) -> Bool {
+        automaticallyChecksForUpdates
+    }
+}
+
 public struct LocationAutoRecoveryAttempt: Equatable, Sendable {
     public let number: Int
     public let total: Int

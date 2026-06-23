@@ -1,3 +1,4 @@
+import LocateAppCore
 import Sparkle
 import SwiftUI
 
@@ -23,11 +24,17 @@ struct LocateAppMain: App {
     init() {
         if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
            Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") != nil {
-            updaterController = SPUStandardUpdaterController(
+            let controller = SPUStandardUpdaterController(
                 startingUpdater: true,
                 updaterDelegate: nil,
                 userDriverDelegate: nil
             )
+            updaterController = controller
+            if AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(
+                automaticallyChecksForUpdates: controller.updater.automaticallyChecksForUpdates
+            ) {
+                controller.updater.checkForUpdatesInBackground()
+            }
         } else {
             updaterController = nil
         }
