@@ -62,6 +62,7 @@ final class AppModel: ObservableObject {
     private var locationContinuityTask: Task<Void, Never>?
     private let autoRecoveryPolicy = LocationAutoRecoveryPolicy()
     private var autoRecoveryTask: Task<Void, Never>?
+    private var autoRecoveryGeneration = 0
     private let powerEventObserverBag = PowerEventObserverBag()
 
     deinit {
@@ -328,6 +329,7 @@ final class AppModel: ObservableObject {
     }
 
     func moveToSelectedLocation() {
+        cancelAutoRecovery()
         runBusy("iPhoneの場所を移動しています...") {
             do {
                 let coordinate = try Coordinate.parsePair(self.coordinateInputText)
@@ -584,20 +586,22 @@ final class AppModel: ObservableObject {
             return
         }
 
+        autoRecoveryGeneration += 1
+        let recoveryGeneration = autoRecoveryGeneration
         autoRecoveryTask = Task { [weak self] in
-            await self?.runAutoRecovery(issue: issue, coordinate: coordinate)
+            await self?.runAutoRecovery(issue: issue, coordinate: coordinate, generation: recoveryGeneration)
         }
     }
 
-    private func runAutoRecovery(issue: LocationContinuityIssue, coordinate: Coordinate) async {
+    private func runAutoRecovery(issue: LocationContinuityIssue, coordinate: Coordinate, generation: Int) async {
         defer {
-            if !Task.isCancelled {
+            if autoRecoveryGeneration == generation {
                 autoRecoveryTask = nil
             }
         }
 
         for attempt in autoRecoveryPolicy.attempts {
-            guard !Task.isCancelled else {
+            guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
                 return
             }
 
@@ -605,9 +609,7 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
 
-            guard !Task.isCancelled,
-                  activeCoordinate == coordinate,
-                  !activeLocationMayRemain else {
+            guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
                 return
             }
 
@@ -615,22 +617,46 @@ final class AppModel: ObservableObject {
 
             do {
                 let endpoint = try await ensureTunnel(forceRestart: true)
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    return
+                }
                 try await session.prepare(endpoint: endpoint)
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    return
+                }
                 try await session.setLocation(endpoint: endpoint, coordinate: coordinate)
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    return
+                }
                 activeCoordinate = coordinate
                 activeLocationMayRemain = false
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    return
+                }
                 status = "自動再接続しました。Macが起きていてUSB接続が続く間、この場所が使われます。\(startSleepPreventionStatus())"
                 return
             } catch {
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                    return
+                }
                 rsdEndpoint = nil
                 rsdDeviceID = nil
                 let message = userFacingMessage(for: error)
                 if LocationAutoRecoveryErrorClassifier.isUserCancellation(message) {
+                    guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                        return
+                    }
                     markActiveLocationUncertain(reason: message)
                     return
                 }
                 if attempt.number == autoRecoveryPolicy.maxAttempts {
+                    guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
+                        return
+                    }
                     markActiveLocationUncertain(reason: uncertainReason(for: issue))
+                    return
+                }
+                guard canContinueAutoRecovery(coordinate: coordinate, generation: generation) else {
                     return
                 }
                 status = "\(autoRecoveryPolicy.progressText(for: attempt)) 失敗しました: \(message)"
@@ -638,7 +664,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func canContinueAutoRecovery(coordinate: Coordinate, generation: Int) -> Bool {
+        !Task.isCancelled &&
+            autoRecoveryGeneration == generation &&
+            activeCoordinate == coordinate &&
+            !activeLocationMayRemain
+    }
+
     private func cancelAutoRecovery() {
+        autoRecoveryGeneration += 1
         autoRecoveryTask?.cancel()
         autoRecoveryTask = nil
     }
