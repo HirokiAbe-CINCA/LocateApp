@@ -58,6 +58,7 @@ XML
         "VERSION": "1.2.3",
         "RELEASE_DIR": str(release_dir),
         "SPARKLE_TOOLS_DIR": str(tools_dir),
+        "SPARKLE_ALLOW_EXISTING_TOOLS": "1",
         "SPARKLE_ED_PRIVATE_KEY": "private-key",
         "CAPTURE_DIR": str(capture_dir),
     }
@@ -83,6 +84,7 @@ def test_generate_sparkle_appcast_requires_private_key(tmp_path):
         "VERSION": "1.2.3",
         "RELEASE_DIR": str(release_dir),
         "SPARKLE_TOOLS_DIR": str(tmp_path / "sparkle"),
+        "SPARKLE_ALLOW_EXISTING_TOOLS": "1",
     }
     env.pop("SPARKLE_ED_PRIVATE_KEY", None)
 
@@ -90,3 +92,42 @@ def test_generate_sparkle_appcast_requires_private_key(tmp_path):
 
     assert result.returncode != 0
     assert "SPARKLE_ED_PRIVATE_KEY" in result.stderr
+
+
+def test_generate_sparkle_appcast_does_not_trust_existing_tools_by_default(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    (release_dir / "LocateApp-1.2.3-mac-arm64.zip").write_bytes(b"zip bytes")
+
+    tools_dir = tmp_path / "sparkle"
+    bin_dir = tools_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    marker = tmp_path / "fake-tool-ran"
+    fake_generate_appcast = bin_dir / "generate_appcast"
+    fake_generate_appcast.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+touch {marker}
+"""
+    )
+    fake_generate_appcast.chmod(0o755)
+
+    bogus_archive = tmp_path / "Sparkle-2.9.3.tar.xz"
+    bogus_archive.write_bytes(b"not sparkle")
+
+    env = {
+        **os.environ,
+        "VERSION": "1.2.3",
+        "RELEASE_DIR": str(release_dir),
+        "SPARKLE_TOOLS_DIR": str(tools_dir),
+        "SPARKLE_TOOLS_URL": bogus_archive.as_uri(),
+        "SPARKLE_TOOLS_SHA256": "0" * 64,
+        "SPARKLE_ED_PRIVATE_KEY": "private-key",
+    }
+
+    result = subprocess.run([str(SCRIPT)], env=env, text=True, capture_output=True)
+
+    assert result.returncode != 0
+    assert "Sparkle tools checksum mismatch" in result.stderr
+    assert not marker.exists()
+    assert not (release_dir / "appcast.xml").exists()

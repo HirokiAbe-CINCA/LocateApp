@@ -33,6 +33,23 @@ sign_target() {
   codesign "${args[@]}" "$target"
 }
 
+sign_target_preserving_entitlements() {
+  local target="$1"
+  local entitlements
+  entitlements="$(mktemp "${TMPDIR:-/tmp}/LocateAppEntitlements.XXXXXX.plist")"
+  if codesign -d --entitlements :- "$target" > "$entitlements" 2>/dev/null &&
+      grep -q "<key>" "$entitlements"; then
+    local args=(--force --sign "$SIGNING_IDENTITY" --entitlements "$entitlements")
+    if is_developer_id_signing; then
+      args+=(--timestamp --options runtime)
+    fi
+    codesign "${args[@]}" "$target"
+  else
+    sign_target "$target"
+  fi
+  rm -f "$entitlements"
+}
+
 is_macho_file() {
   local path="$1"
   file "$path" | grep -Eq 'Mach-O'
@@ -88,18 +105,27 @@ sign_sparkle_framework() {
   local version_dir="$framework/Versions/B"
   local target
   local targets=(
-    "$version_dir/Autoupdate"
     "$version_dir/XPCServices/Downloader.xpc"
     "$version_dir/XPCServices/Installer.xpc"
     "$version_dir/Updater.app"
     "$framework"
   )
 
+  if [[ -e "$version_dir/Autoupdate" ]]; then
+    sign_target_preserving_entitlements "$version_dir/Autoupdate"
+  fi
+
   for target in "${targets[@]}"; do
     if [[ -e "$target" ]]; then
       sign_target "$target"
     fi
   done
+}
+
+ensure_framework_rpath() {
+  if ! otool -l "$EXECUTABLE" | grep -Fq "@executable_path/../Frameworks"; then
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE"
+  fi
 }
 
 cd "$ROOT"
@@ -119,6 +145,8 @@ command -v swift >/dev/null
 command -v plutil >/dev/null
 command -v codesign >/dev/null
 command -v iconutil >/dev/null
+command -v install_name_tool >/dev/null
+command -v otool >/dev/null
 
 case "$CONFIGURATION" in
   debug|release)
@@ -138,6 +166,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/LocateApp" "$EXECUTABLE"
 copy_sparkle_framework "$SPARKLE_FRAMEWORK"
+ensure_framework_rpath
 
 "$ROOT/.venv/bin/python" "$ROOT/scripts/generate_app_icon.py" \
   --output "$APP/Contents/Resources/AppIcon.icns" \

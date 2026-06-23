@@ -16,6 +16,7 @@ DMG="$RELEASE_DIR/$ARCHIVE_BASE.dmg"
 SUMS="$RELEASE_DIR/SHA256SUMS.txt"
 APPCAST="$RELEASE_DIR/appcast.xml"
 EXPECT_NOTARIZED="${EXPECT_NOTARIZED:-0}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://hirokiabe-cinca.github.io/LocateApp/appcast.xml}"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -30,13 +31,18 @@ verify_app() {
   local icon="$app/Contents/Resources/AppIcon.icns"
   local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
   local sparkle_executable="$sparkle_framework/Sparkle"
+  local autoupdate="$sparkle_framework/Versions/B/Autoupdate"
   local version
 
   test -x "$app/Contents/MacOS/LocateApp"
   test -x "$helper"
   test -f "$icon"
   test -x "$sparkle_executable"
-  codesign --verify --strict --verbose=2 "$sparkle_framework/Versions/B/Autoupdate"
+  otool -l "$app/Contents/MacOS/LocateApp" | grep -Fq "@executable_path/../Frameworks"
+  otool -L "$app/Contents/MacOS/LocateApp" | grep -Fq "@rpath/Sparkle.framework"
+  codesign --verify --strict --verbose=2 "$autoupdate"
+  codesign -d --entitlements :- "$autoupdate" 2>/dev/null |
+    grep -q "<key>com.apple.application-identifier</key>"
   codesign --verify --strict --verbose=2 "$sparkle_framework/Versions/B/XPCServices/Downloader.xpc"
   codesign --verify --strict --verbose=2 "$sparkle_framework/Versions/B/XPCServices/Installer.xpc"
   codesign --verify --strict --verbose=2 "$sparkle_framework/Versions/B/Updater.app"
@@ -53,10 +59,45 @@ verify_app() {
     exit 1
   fi
 
+  if [[ -f "$APPCAST" ]]; then
+    verify_sparkle_plist "$app"
+  fi
+
   "$helper" usbmux list >/dev/null
 
   if [[ "$ARCHIVE_BASE" == *mac-arm64 ]]; then
     file "$app/Contents/MacOS/LocateApp" | grep -q "arm64"
+  fi
+}
+
+verify_sparkle_plist() {
+  local app="$1"
+  local plist="$app/Contents/Info.plist"
+  local feed_url
+  local public_key
+  local enable_checks
+  local automatically_update
+
+  feed_url="$(plutil -extract SUFeedURL raw -o - "$plist")"
+  public_key="$(plutil -extract SUPublicEDKey raw -o - "$plist")"
+  enable_checks="$(plutil -extract SUEnableAutomaticChecks raw -o - "$plist")"
+  automatically_update="$(plutil -extract SUAutomaticallyUpdate raw -o - "$plist")"
+
+  if [[ "$feed_url" != "$SPARKLE_FEED_URL" ]]; then
+    echo "Expected Sparkle feed $SPARKLE_FEED_URL, got $feed_url" >&2
+    exit 1
+  fi
+  if [[ -z "$public_key" ]]; then
+    echo "Sparkle public EdDSA key is missing from Info.plist" >&2
+    exit 1
+  fi
+  if [[ "$enable_checks" != "1" && "$enable_checks" != "true" ]]; then
+    echo "SUEnableAutomaticChecks must be true" >&2
+    exit 1
+  fi
+  if [[ "$automatically_update" != "1" && "$automatically_update" != "true" ]]; then
+    echo "SUAutomaticallyUpdate must be true" >&2
+    exit 1
   fi
 }
 

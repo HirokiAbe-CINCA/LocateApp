@@ -38,7 +38,7 @@ require_file() {
 }
 
 ensure_sparkle_tools() {
-  if [[ -x "$SPARKLE_TOOLS_DIR/bin/generate_appcast" ]]; then
+  if [[ "${SPARKLE_ALLOW_EXISTING_TOOLS:-0}" == "1" && -x "$SPARKLE_TOOLS_DIR/bin/generate_appcast" ]]; then
     return
   fi
 
