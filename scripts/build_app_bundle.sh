@@ -83,6 +83,25 @@ copy_sparkle_framework() {
   ditto "$source" "$destination"
 }
 
+sign_sparkle_framework() {
+  local framework="$APP/Contents/Frameworks/Sparkle.framework"
+  local version_dir="$framework/Versions/B"
+  local target
+  local targets=(
+    "$version_dir/Autoupdate"
+    "$version_dir/XPCServices/Downloader.xpc"
+    "$version_dir/XPCServices/Installer.xpc"
+    "$version_dir/Updater.app"
+    "$framework"
+  )
+
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      sign_target "$target"
+    fi
+  done
+}
+
 cd "$ROOT"
 
 if [[ ! -x "$ROOT/.venv/bin/pymobiledevice3" ]]; then
@@ -185,7 +204,7 @@ plutil -lint "$APP/Contents/Info.plist"
 if is_developer_id_signing; then
   sign_nested_macho_files
 fi
-sign_target "$APP/Contents/Frameworks/Sparkle.framework"
+sign_sparkle_framework
 sign_target "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 

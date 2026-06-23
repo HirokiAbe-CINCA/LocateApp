@@ -193,6 +193,10 @@ mkdir -p "$RELEASE_DIR" "$DMG_STAGING_DIR" "$NOTARY_WORK_DIR"
 if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
   command -v xcrun >/dev/null
   command -v python3 >/dev/null
+  if [[ -z "${SPARKLE_PUBLIC_ED_KEY:-}" || -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+    echo "Notarized releases require SPARKLE_PUBLIC_ED_KEY and SPARKLE_ED_PRIVATE_KEY for Sparkle updates." >&2
+    exit 1
+  fi
   prepare_notary_key
 fi
 
@@ -203,6 +207,9 @@ build_env=(
 )
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   build_env+=(SIGNING_IDENTITY="$SIGNING_IDENTITY")
+fi
+if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
+  build_env+=(SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY")
 fi
 env "${build_env[@]}" "$ROOT/scripts/build_app_bundle.sh"
 
@@ -252,12 +259,16 @@ cat > "$RELEASE_DIR/RELEASE_NOTES.md" <<NOTES
 # LocateApp $VERSION
 
 - Japanese low-step UI for choosing a place and moving the connected iPhone location.
-- In-app update notice with a direct download button for newer GitHub Releases.
+- Sparkle-powered automatic updates for signed release builds.
 - Styled DMG installer with a LocateApp background and Applications shortcut.
 - Hardened tunnel/process handling and release artifact verification.
 - Simplified geometric app icon and embedded pymobiledevice3 helper.
 $NOTARIZATION_NOTE
 NOTES
+
+if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
+  VERSION="$VERSION" RELEASE_DIR="$RELEASE_DIR" "$ROOT/scripts/generate_sparkle_appcast.sh"
+fi
 
 (
   cd "$RELEASE_DIR"

@@ -28,14 +28,19 @@ struct CheckForUpdatesView: View {
 @main
 struct LocateAppMain: App {
     @StateObject private var model = AppModel()
-    private let updaterController: SPUStandardUpdaterController
+    private let updaterController: SPUStandardUpdaterController?
 
     init() {
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
+           Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") != nil {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
+        } else {
+            updaterController = nil
+        }
     }
 
     var body: some Scene {
@@ -52,7 +57,9 @@ struct LocateAppMain: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                if let updater = updaterController?.updater {
+                    CheckForUpdatesView(updater: updater)
+                }
             }
         }
     }
