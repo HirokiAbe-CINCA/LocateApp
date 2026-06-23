@@ -28,7 +28,7 @@ jobs:
         run: .venv/bin/python -m pytest
 
       - name: Swift core checks
-        run: swift run LocateAppCoreChecks
+        run: bash scripts/run_swift_core_checks.sh
 
       - name: Swift build
         run: swift build
@@ -36,4 +36,4 @@ jobs:
       - name: Script syntax
         run: |
           python -m py_compile scripts/generate_app_icon.py scripts/generate_dmg_background.py scripts/verify_sparkle_keypair.py
-          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/import_apple_certificate.sh scripts/package_release.sh scripts/verify_release_artifacts.sh scripts/generate_sparkle_appcast.sh
+          bash -n scripts/build_app_bundle.sh scripts/build_helper.sh scripts/clean_generated.sh scripts/e2e_smoke.sh scripts/import_apple_certificate.sh scripts/package_release.sh scripts/verify_release_artifacts.sh scripts/generate_sparkle_appcast.sh scripts/run_swift_core_checks.sh

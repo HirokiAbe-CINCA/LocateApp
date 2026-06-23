@@ -219,7 +219,7 @@ hold is 5 seconds; pass `--hold-seconds` to change it:
 ## Verification
 
 ```bash
-swift run LocateAppCoreChecks
+bash scripts/run_swift_core_checks.sh
 .venv/bin/python -m pytest
 ./scripts/build_app_bundle.sh
 ./scripts/e2e_smoke.sh
