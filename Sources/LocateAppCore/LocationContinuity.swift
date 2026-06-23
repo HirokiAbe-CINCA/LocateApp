@@ -25,3 +25,50 @@ public enum LocationReapplyPrompt {
         hasActiveCoordinate && activeLocationMayRemain
     }
 }
+
+public struct LocationAutoRecoveryAttempt: Equatable, Sendable {
+    public let number: Int
+    public let total: Int
+
+    public init(number: Int, total: Int) {
+        self.number = number
+        self.total = total
+    }
+}
+
+public struct LocationAutoRecoveryPolicy: Equatable, Sendable {
+    public let maxAttempts: Int
+    public let retryDelaySeconds: TimeInterval
+
+    public init(maxAttempts: Int = 3, retryDelaySeconds: TimeInterval = 10) {
+        self.maxAttempts = maxAttempts
+        self.retryDelaySeconds = retryDelaySeconds
+    }
+
+    public var attempts: [LocationAutoRecoveryAttempt] {
+        guard maxAttempts > 0 else {
+            return []
+        }
+        return (1...maxAttempts).map { LocationAutoRecoveryAttempt(number: $0, total: maxAttempts) }
+    }
+
+    public func delayBeforeAttempt(_ attemptNumber: Int) -> TimeInterval? {
+        guard attemptNumber >= 1, attemptNumber <= maxAttempts else {
+            return nil
+        }
+        return attemptNumber == 1 ? 0 : retryDelaySeconds
+    }
+
+    public func progressText(for attempt: LocationAutoRecoveryAttempt) -> String {
+        "自動再接続中です... \(attempt.number)/\(attempt.total)"
+    }
+}
+
+public enum LocationAutoRecoveryErrorClassifier {
+    public static func isUserCancellation(_ message: String) -> Bool {
+        message.localizedCaseInsensitiveContains("User canceled") ||
+            message.localizedCaseInsensitiveContains("キャンセル") ||
+            message.localizedCaseInsensitiveContains("(-128)") ||
+            message.localizedCaseInsensitiveContains("-128")
+    }
+}

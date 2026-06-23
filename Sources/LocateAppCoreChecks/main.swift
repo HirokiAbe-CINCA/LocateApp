@@ -293,6 +293,54 @@ func runChecks() throws {
         "reapply prompt should not be available without a previous coordinate"
     )
 
+    let recoveryPolicy = LocationAutoRecoveryPolicy()
+    try check(
+        recoveryPolicy.maxAttempts == 3,
+        "auto recovery should allow three attempts"
+    )
+    try check(
+        recoveryPolicy.attempts.map(\.number) == [1, 2, 3],
+        "auto recovery attempts should be numbered 1 through 3"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(1) == 0,
+        "first auto recovery attempt should run immediately"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(2) == 10,
+        "second auto recovery attempt should wait 10 seconds"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(3) == 10,
+        "third auto recovery attempt should wait 10 seconds"
+    )
+    try check(
+        recoveryPolicy.delayBeforeAttempt(4) == nil,
+        "fourth auto recovery attempt should not be allowed"
+    )
+    try check(
+        recoveryPolicy.progressText(for: LocationAutoRecoveryAttempt(number: 2, total: 3)) == "自動再接続中です... 2/3",
+        "auto recovery progress text mismatch"
+    )
+    try check(
+        LocationAutoRecoveryErrorClassifier.isUserCancellation(
+            "管理者認証がキャンセルされました。もう一度実行し、表示された認証を承認してください。"
+        ),
+        "Japanese administrator cancellation should be non-retryable"
+    )
+    try check(
+        LocationAutoRecoveryErrorClassifier.isUserCancellation("User canceled."),
+        "English user cancellation should be non-retryable"
+    )
+    try check(
+        LocationAutoRecoveryErrorClassifier.isUserCancellation("osascript error -128"),
+        "AppleScript -128 cancellation should be non-retryable"
+    )
+    try check(
+        !LocationAutoRecoveryErrorClassifier.isUserCancellation("No route to host"),
+        "ordinary connection errors should remain retryable"
+    )
+
     let parsedPID = try PIDFile.parse("1234\n")
     try check(parsedPID == 1234, "pid parse mismatch")
     try checkThrows("invalid pid did not throw") {
