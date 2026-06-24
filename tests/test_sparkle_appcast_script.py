@@ -78,6 +78,8 @@ XML
     assert "--download-url-prefix\nhttps://github.com/HirokiAbe-CINCA/LocateApp/releases/download/v1.2.3/\n" in args
     staged_notes = tmp_path / "build" / "sparkle-appcast" / "LocateApp-1.2.3-mac-arm64.md"
     assert staged_notes.read_text() == "# LocateApp 1.2.3\n\n- Test notes.\n"
+    published_notes = release_dir / "LocateApp-1.2.3-mac-arm64.md"
+    assert published_notes.read_text() == "# LocateApp 1.2.3\n\n- Test notes.\n"
 
 
 def test_generate_sparkle_appcast_requires_private_key(tmp_path):

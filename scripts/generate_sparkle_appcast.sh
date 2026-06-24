@@ -88,6 +88,8 @@ printf '%s' "$SPARKLE_ED_PRIVATE_KEY" |
     -o "$APPCAST" \
     "$APPCAST_STAGING_DIR"
 
+cp "$APPCAST_STAGING_DIR/$ARCHIVE_BASE.md" "$RELEASE_DIR/$ARCHIVE_BASE.md"
+
 if command -v xmllint >/dev/null; then
   xmllint --noout "$APPCAST"
 fi
