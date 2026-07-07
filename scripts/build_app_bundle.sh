@@ -4,8 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/dist/LocateApp.app"
 EXECUTABLE="$APP/Contents/MacOS/LocateApp"
+DAEMON_EXECUTABLE="$APP/Contents/MacOS/LocateTunneldDaemon"
 CONFIGURATION="${CONFIGURATION:-debug}"
 BUNDLE_HELPER="${BUNDLE_HELPER:-0}"
+ENABLE_TUNNELD="${ENABLE_TUNNELD:-$BUNDLE_HELPER}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${APPLE_SIGNING_IDENTITY:--}}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://hirokiabe-cinca.github.io/LocateApp/appcast.xml}"
 if [[ -z "$SIGNING_IDENTITY" ]]; then
@@ -19,6 +21,7 @@ if [[ -z "${APP_VERSION:-}" ]]; then
   fi
 fi
 APP_BUILD="${APP_BUILD:-${GITHUB_RUN_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}}"
+TUNNELD_PLIST_SOURCE="$ROOT/packaging/LaunchDaemons/jp.cinca.LocateApp.tunneld.plist"
 
 is_developer_id_signing() {
   [[ "$SIGNING_IDENTITY" != "-" ]]
@@ -128,6 +131,26 @@ ensure_framework_rpath() {
   fi
 }
 
+install_tunneld_launch_daemon_plist() {
+  local destination_dir="$APP/Contents/Library/LaunchDaemons"
+  local destination="$destination_dir/jp.cinca.LocateApp.tunneld.plist"
+
+  if [[ ! -f "$TUNNELD_PLIST_SOURCE" ]]; then
+    echo "Missing tunneld LaunchDaemon plist: $TUNNELD_PLIST_SOURCE" >&2
+    exit 1
+  fi
+
+  mkdir -p "$destination_dir"
+  cp "$TUNNELD_PLIST_SOURCE" "$destination"
+  plutil -lint "$destination"
+}
+
+copy_tunneld_daemon() {
+  swift build -c "$CONFIGURATION" --product LocateTunneldDaemon
+  cp "$BIN_DIR/LocateTunneldDaemon" "$DAEMON_EXECUTABLE"
+  sign_target "$DAEMON_EXECUTABLE"
+}
+
 cd "$ROOT"
 
 if [[ ! -x "$ROOT/.venv/bin/pymobiledevice3" ]]; then
@@ -157,6 +180,18 @@ case "$CONFIGURATION" in
     ;;
 esac
 
+case "$ENABLE_TUNNELD" in
+  1|true|yes)
+    BUNDLE_HELPER=1
+    ;;
+  0|false|no)
+    ;;
+  *)
+    echo "ENABLE_TUNNELD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+
 echo "Building $CONFIGURATION app bundle..."
 swift build -c "$CONFIGURATION" --product LocateApp
 BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
@@ -180,6 +215,12 @@ case "$BUNDLE_HELPER" in
     HELPER_DIR="${HELPER_DIST_DIR:-$ROOT/build/helper-dist}/pymobiledevice3-helper"
     rm -rf "$APP/Contents/Resources/pymobiledevice3-helper"
     cp -R "$HELPER_DIR" "$APP/Contents/Resources/pymobiledevice3-helper"
+    case "$ENABLE_TUNNELD" in
+      1|true|yes)
+        copy_tunneld_daemon
+        install_tunneld_launch_daemon_plist
+        ;;
+    esac
     ;;
   *)
     echo "BUNDLE_HELPER must be 0 or 1" >&2

@@ -197,6 +197,11 @@ struct DevicePanel: View {
                 }
                 .disabled(model.isBusy)
                 .accessibilityLabel("移動を解除")
+
+                Divider()
+
+                autoRecoverySettings
+                eventLogView
             }
             .padding(4)
         }
@@ -230,6 +235,14 @@ struct DevicePanel: View {
                 .foregroundStyle(model.isPreventingSleep ? Color.secondary : Color.orange)
             }
 
+            if model.activeCoordinate != nil {
+                continuityStatusView
+            }
+
+            if model.hasDetectedDeviceReconnect, model.canReapplyActiveLocation {
+                reconnectBanner
+            }
+
             if model.canReapplyActiveLocation {
                 Button {
                     model.reapplyActiveLocation()
@@ -238,13 +251,127 @@ struct DevicePanel: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(model.shouldHighlightReapplyAction ? Color.orange : Color.accentColor)
                 .controlSize(.regular)
                 .disabled(model.isBusy)
                 .accessibilityLabel("前回の場所へ再移動")
                 .help("iPhoneを接続・ロック解除して、前回の座標をもう一度設定します。")
             }
+
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var continuityStatusView: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let runtimeText = model.continuityRuntimeText {
+                Text(runtimeText)
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+            }
+            Text(model.continuityMonitorText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var reconnectBanner: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                .frame(width: 14)
+            Text(model.autoReapplyAfterWake || model.keepsTryingAutoRecovery ? "iPhoneを再検出しました。再移動を自動実行します。" : "iPhoneを再検出しました。前回の場所へ再移動できます。")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(Color.orange)
+    }
+
+    private var autoRecoverySettings: some View {
+        DisclosureGroup("自動再接続") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("復旧を諦めない", isOn: $model.keepsTryingAutoRecovery)
+                Toggle("スリープ復帰後に自動再移動", isOn: $model.autoReapplyAfterWake)
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.privilegedTunneldStatusText)
+                        .font(.caption.weight(.semibold))
+                    Text(model.privilegedTunneldHelpText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 6) {
+                        Button {
+                            model.refreshPrivilegedTunneldStatus()
+                        } label: {
+                            Label("状態更新", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(model.isBusy)
+
+                        if model.canRegisterPrivilegedTunneld {
+                            Button {
+                                model.registerPrivilegedTunneld()
+                            } label: {
+                                Label("登録", systemImage: "lock.shield")
+                            }
+                            .disabled(model.isBusy)
+                        }
+
+                        if model.canOpenPrivilegedTunneldSettings {
+                            Button {
+                                model.openPrivilegedTunneldSettings()
+                            } label: {
+                                Label("設定を開く", systemImage: "gearshape")
+                            }
+                            .disabled(model.isBusy)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Stepper(
+                    "初回間隔 \(Int(model.autoRecoveryRetryDelaySeconds))秒",
+                    value: $model.autoRecoveryRetryDelaySeconds,
+                    in: 5...120,
+                    step: 5
+                )
+                Stepper(
+                    "最大間隔 \(Int(model.autoRecoveryMaximumDelaySeconds))秒",
+                    value: $model.autoRecoveryMaximumDelaySeconds,
+                    in: 10...300,
+                    step: 10
+                )
+                Text(model.autoRecoveryPolicySummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 6)
+        }
+        .font(.caption)
+    }
+
+    private var eventLogView: some View {
+        DisclosureGroup("イベントログ") {
+            VStack(alignment: .leading, spacing: 6) {
+                if model.locationEventLog.isEmpty {
+                    Text("イベントはまだありません。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.locationEventLog.prefix(10)) { entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(entry.timeText)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text(entry.message)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
+            .font(.caption2)
+            .padding(.top, 6)
+        }
+        .font(.caption)
     }
 
     private var connectionTint: Color {

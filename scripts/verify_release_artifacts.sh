@@ -28,6 +28,7 @@ require_file() {
 
 verify_app() {
   local app="$1"
+  local daemon="$app/Contents/MacOS/LocateTunneldDaemon"
   local helper="$app/Contents/Resources/pymobiledevice3-helper/pymobiledevice3-helper"
   local icon="$app/Contents/Resources/AppIcon.icns"
   local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
@@ -36,6 +37,7 @@ verify_app() {
   local version
 
   test -x "$app/Contents/MacOS/LocateApp"
+  test -x "$daemon"
   test -x "$helper"
   test -f "$icon"
   test -x "$sparkle_executable"
@@ -49,6 +51,7 @@ verify_app() {
   codesign --verify --strict --verbose=2 "$sparkle_framework/Versions/B/Updater.app"
   codesign --verify --strict --verbose=2 "$sparkle_framework"
   codesign --verify --deep --strict --verbose=2 "$app"
+  APP="$app" "$ROOT/scripts/verify_tunneld_bundle.sh"
   if [[ "$EXPECT_NOTARIZED" == "1" ]]; then
     xcrun stapler validate "$app"
     spctl --assess --type execute --verbose=2 "$app"

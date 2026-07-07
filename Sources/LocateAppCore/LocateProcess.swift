@@ -36,19 +36,6 @@ public enum Shell {
     }
 }
 
-public enum AppleScript {
-    public static func quote(_ value: String) -> String {
-        "\"" + value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"") + "\""
-    }
-}
-
-public struct AdminTunnelScript: Equatable, Sendable {
-    public let script: String
-    public let osascriptCommand: [String]
-}
-
 public enum ProcessMatcher {
     public static func isSimulatedLocationSetCommand(_ commandLine: String) -> Bool {
         let tokens = commandLineTokens(commandLine)
@@ -101,41 +88,6 @@ public struct LocateSessionCommands: Sendable {
         self.files = files ?? SessionFiles(directory: paths.stateDirectory)
     }
 
-    public func adminTunnelScript(device: DeviceInfo) -> AdminTunnelScript {
-        let command = paths.tunnelCommand(device: device)
-        let background = [
-            "\(Shell.join(command)) > \(Shell.quote(files.tunnelOutput.path)) 2> \(Shell.quote(files.tunnelError.path)) &",
-            "echo $! > \(Shell.quote(files.tunnelPID.path))"
-        ].joined(separator: " ")
-        let scriptParts = [
-            "mkdir -p \(Shell.quote(files.directory.path))",
-            tunnelCleanupScript,
-            "cd \(Shell.quote(paths.root.path))",
-            "(\(background))"
-        ]
-        let script = scriptParts.joined(separator: " && ")
-
-        return AdminTunnelScript(
-            script: script,
-            osascriptCommand: [
-                "/usr/bin/osascript",
-                "-e",
-                "do shell script \(AppleScript.quote(script)) with administrator privileges"
-            ]
-        )
-    }
-
-    public func adminStopTunnelScript() -> AdminTunnelScript {
-        AdminTunnelScript(
-            script: tunnelCleanupScript,
-            osascriptCommand: [
-                "/usr/bin/osascript",
-                "-e",
-                "do shell script \(AppleScript.quote(tunnelCleanupScript)) with administrator privileges"
-            ]
-        )
-    }
-
     public func clearCommand(endpoint: RSDEndpoint) -> [String] {
         paths.clearLocationCommand(endpoint: endpoint)
     }
@@ -159,12 +111,6 @@ public struct LocateSessionCommands: Sendable {
         return ["/bin/sh", "-c", script]
     }
 
-    private var tunnelCleanupScript: String {
-        [
-            "if [ -f \(Shell.quote(files.tunnelPID.path)) ]; then pid=$(cat \(Shell.quote(files.tunnelPID.path)) | tr -cd '0-9'); if [ -n \"$pid\" ]; then cmd=$(ps -p \"$pid\" -o command= 2>/dev/null || true); case \"$cmd\" in *pymobiledevice3*lockdown*start-tunnel*) kill \"$pid\" 2>/dev/null || true ;; esac; fi; fi",
-            "rm -f \(Shell.quote(files.tunnelPID.path)) \(Shell.quote(files.tunnelOutput.path)) \(Shell.quote(files.tunnelError.path))"
-        ].joined(separator: " && ")
-    }
 }
 
 public struct PIDFile {
@@ -252,18 +198,160 @@ public final class ProcessRunner: @unchecked Sendable {
     }
 }
 
+public final class TunneldClient: @unchecked Sendable {
+    private let socketPath: String
+
+    public init(socketPath: String = TunneldProtocol.socketPath) {
+        self.socketPath = socketPath
+    }
+
+    public func startTunnel(device: DeviceInfo) async throws -> RSDEndpoint {
+        let text = try await send(command: "start-tunnel", deviceID: device.identifier)
+        return try TunneldStartTunnelResponse.parse(text).endpoint
+    }
+
+    public func endpoint(device: DeviceInfo) async throws -> RSDEndpoint? {
+        let text = try await send(command: "list-tunnels", deviceID: device.identifier)
+        return try TunneldListResponse.parse(text).endpoint(for: device.identifier)
+    }
+
+    public func stopTunnel(device: DeviceInfo) async throws {
+        let text = try await send(command: "stop-tunnel", deviceID: device.identifier)
+        if let error = TunneldProtocol.errorMessage(from: text) {
+            throw LocateError.processControlFailed(error)
+        }
+    }
+
+    private func send(command: String, deviceID: String) async throws -> String {
+        let socketPath = self.socketPath
+        let requestData = try TunneldProtocol.requestData(command: command, deviceID: deviceID)
+        return try await Task.detached {
+            try Self.sendBlocking(requestData: requestData, socketPath: socketPath)
+        }.value
+    }
+
+    private static func sendBlocking(requestData: Data, socketPath: String) throws -> String {
+        let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
+            throw LocateError.processControlFailed("tunneld socketを作成できませんでした: errno \(errno)")
+        }
+        defer {
+            Darwin.close(socketFD)
+        }
+        try setSocketTimeouts(socketFD, seconds: 75)
+
+        var address = try unixSocketAddress(path: socketPath)
+        let connectResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(socketFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connectResult == 0 else {
+            throw LocateError.processControlFailed("特権tunneldに接続できませんでした: errno \(errno)")
+        }
+
+        var payload = requestData
+        payload.append(0x0a)
+        try payload.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                return
+            }
+            var offset = 0
+            while offset < payload.count {
+                let written = Darwin.write(socketFD, baseAddress.advanced(by: offset), payload.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                    throw LocateError.processControlFailed("特権tunneldへの送信がタイムアウトしました")
+                } else if errno != EINTR {
+                    throw LocateError.processControlFailed("特権tunneldへの送信に失敗しました: errno \(errno)")
+                }
+            }
+        }
+        Darwin.shutdown(socketFD, SHUT_WR)
+
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = Darwin.read(socketFD, &buffer, buffer.count)
+            if count > 0 {
+                response.append(buffer, count: count)
+            } else if count == 0 {
+                break
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                throw LocateError.processControlFailed("特権tunneldからの応答がタイムアウトしました")
+            } else if errno != EINTR {
+                throw LocateError.processControlFailed("特権tunneldからの応答受信に失敗しました: errno \(errno)")
+            }
+        }
+
+        guard let text = String(data: response, encoding: .utf8) else {
+            throw LocateError.invalidRSDOutput("tunneld response was not UTF-8")
+        }
+        if let error = TunneldProtocol.errorMessage(from: text) {
+            throw LocateError.processControlFailed(error)
+        }
+        return text
+    }
+
+    private static func unixSocketAddress(path: String) throws -> sockaddr_un {
+        let pathCapacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+        guard path.utf8.count < pathCapacity else {
+            throw LocateError.processControlFailed("tunneld socket path is too long")
+        }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        #if os(macOS)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
+        _ = path.withCString { pathPointer in
+            withUnsafeMutablePointer(to: &address.sun_path) { tuplePointer in
+                tuplePointer.withMemoryRebound(to: CChar.self, capacity: pathCapacity) { buffer in
+                    strncpy(buffer, pathPointer, pathCapacity - 1)
+                }
+            }
+        }
+        return address
+    }
+
+    private static func setSocketTimeouts(_ socketFD: Int32, seconds: Int) throws {
+        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+        let receiveResult = withUnsafePointer(to: &timeout) { pointer in
+            pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { bytes in
+                Darwin.setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, bytes, socklen_t(MemoryLayout<timeval>.size))
+            }
+        }
+        guard receiveResult == 0 else {
+            throw LocateError.processControlFailed("tunneld socket receive timeoutを設定できませんでした: errno \(errno)")
+        }
+
+        let sendResult = withUnsafePointer(to: &timeout) { pointer in
+            pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { bytes in
+                Darwin.setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, bytes, socklen_t(MemoryLayout<timeval>.size))
+            }
+        }
+        guard sendResult == 0 else {
+            throw LocateError.processControlFailed("tunneld socket send timeoutを設定できませんでした: errno \(errno)")
+        }
+    }
+}
+
 public actor LocationSessionController {
     private let commands: LocateSessionCommands
     private let runner: ProcessRunner
+    private let tunneldClient: TunneldClient
     private let fileManager: FileManager
 
     public init(
         commands: LocateSessionCommands,
         runner: ProcessRunner = ProcessRunner(),
+        tunneldClient: TunneldClient = TunneldClient(),
         fileManager: FileManager = .default
     ) {
         self.commands = commands
         self.runner = runner
+        self.tunneldClient = tunneldClient
         self.fileManager = fileManager
     }
 
@@ -295,10 +383,28 @@ public actor LocationSessionController {
         return try Coordinate(latitude: parts[0], longitude: parts[1])
     }
 
-    public func startTunnel(device: DeviceInfo) throws {
+    public func startTunnelUsingTunneld(device: DeviceInfo) async throws -> RSDEndpoint {
         try ensureStateDirectory()
-        let script = commands.adminTunnelScript(device: device)
-        _ = try runner.run(script.osascriptCommand, timeout: 120)
+        try terminateStoredTunnelProcess()
+        try? fileManager.removeItem(at: commands.files.tunnelOutput)
+        try? fileManager.removeItem(at: commands.files.tunnelError)
+        try? fileManager.removeItem(at: commands.files.tunnelPID)
+
+        let endpoint = try await tunneldClient.startTunnel(device: device)
+        try "\(endpoint.host) \(endpoint.port)\n"
+            .write(to: commands.files.tunnelOutput, atomically: true, encoding: .utf8)
+        return endpoint
+    }
+
+    public func currentTunneldEndpoint(device: DeviceInfo) async throws -> RSDEndpoint? {
+        try await tunneldClient.endpoint(device: device)
+    }
+
+    public func stopTunneldTunnel(device: DeviceInfo) async throws {
+        try await tunneldClient.stopTunnel(device: device)
+        try? fileManager.removeItem(at: commands.files.tunnelOutput)
+        try? fileManager.removeItem(at: commands.files.tunnelError)
+        try? fileManager.removeItem(at: commands.files.tunnelPID)
     }
 
     public func prepare(endpoint: RSDEndpoint) throws {
@@ -341,9 +447,16 @@ public actor LocationSessionController {
         try? fileManager.removeItem(at: commands.files.setPID)
     }
 
-    public func stopTunnel() throws {
-        let script = commands.adminStopTunnelScript()
-        _ = try runner.run(script.osascriptCommand)
+    public func isTunnelHealthy(endpoint: RSDEndpoint) -> Bool {
+        do {
+            let developerModeOutput = try runner.run(
+                commands.paths.developerModeCommand(endpoint: endpoint),
+                timeout: 10
+            )
+            return try DeveloperMode.isEnabled(developerModeOutput)
+        } catch {
+            return false
+        }
     }
 
     public func isTunnelRunning() -> Bool {
@@ -360,6 +473,22 @@ public actor LocationSessionController {
             return false
         }
         return ProcessMatcher.isSimulatedLocationSetCommand(commandLine)
+    }
+
+    public func storedTunnelPID() -> Int32? {
+        try? readStoredPID(commands.files.tunnelPID)
+    }
+
+    public func storedSetPID() -> Int32? {
+        try? readStoredPID(commands.files.setPID)
+    }
+
+    public func setErrorOutputSize() -> UInt64 {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: commands.files.setError.path),
+              let size = attributes[.size] as? NSNumber else {
+            return 0
+        }
+        return size.uint64Value
     }
 
     private func verifySetProcessStarted() throws {
@@ -399,6 +528,22 @@ public actor LocationSessionController {
         }
 
         try? fileManager.removeItem(at: commands.files.setPID)
+    }
+
+    private func terminateStoredTunnelProcess() throws {
+        guard let pid = try? readStoredPID(commands.files.tunnelPID) else {
+            return
+        }
+
+        guard let commandLine = processCommandLine(pid: pid),
+              ProcessMatcher.isTunnelCommand(commandLine) else {
+            return
+        }
+
+        let result = Darwin.kill(pid, SIGTERM)
+        if result != 0 && errno != ESRCH {
+            throw LocateError.processControlFailed("Could not terminate tunnel process \(pid): errno \(errno)")
+        }
     }
 
     private func readStoredPID(_ url: URL) throws -> Int32 {

@@ -243,6 +243,7 @@ build_env=(
   APP_VERSION="$VERSION"
   CONFIGURATION="${CONFIGURATION:-release}"
   BUNDLE_HELPER=1
+  ENABLE_TUNNELD=1
 )
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   build_env+=(SIGNING_IDENTITY="$SIGNING_IDENTITY")
@@ -251,6 +252,7 @@ if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
   build_env+=(SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY")
 fi
 env "${build_env[@]}" "$ROOT/scripts/build_app_bundle.sh"
+APP="$APP" "$ROOT/scripts/verify_tunneld_bundle.sh"
 
 if [[ "$NOTARIZE_ACTIVE" == "1" ]]; then
   APP_NOTARY_ZIP="$NOTARY_WORK_DIR/$ARCHIVE_BASE-app-notary.zip"

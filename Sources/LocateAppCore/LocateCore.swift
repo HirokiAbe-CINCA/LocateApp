@@ -106,6 +106,115 @@ public struct RSDEndpoint: Equatable, Sendable {
     }
 }
 
+public struct TunneldStartTunnelResponse: Equatable, Sendable {
+    public let endpoint: RSDEndpoint
+
+    public static func parse(_ jsonText: String) throws -> TunneldStartTunnelResponse {
+        let data = Data(jsonText.utf8)
+        let raw: Any
+        do {
+            raw = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw LocateError.invalidRSDOutput(error.localizedDescription)
+        }
+
+        guard let entry = raw as? [String: Any] else {
+            throw LocateError.invalidRSDOutput("tunneld start response was not an object")
+        }
+        if let error = entry["error"] as? String, !error.isEmpty {
+            throw LocateError.processControlFailed(error)
+        }
+        guard let host = entry["address"] as? String,
+              let port = Self.portText(from: entry["port"]) else {
+            throw LocateError.invalidRSDOutput(jsonText)
+        }
+
+        return TunneldStartTunnelResponse(endpoint: RSDEndpoint(host: host, port: port))
+    }
+
+    private static func portText(from value: Any?) -> String? {
+        switch value {
+        case let port as Int:
+            return String(port)
+        case let port as NSNumber:
+            return port.stringValue
+        case let port as String where Int(port) != nil:
+            return port
+        default:
+            return nil
+        }
+    }
+}
+
+public struct TunneldListResponse: Equatable, Sendable {
+    private let endpointsByDeviceID: [String: RSDEndpoint]
+
+    public static func parse(_ jsonText: String) throws -> TunneldListResponse {
+        let data = Data(jsonText.utf8)
+        let raw: Any
+        do {
+            raw = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw LocateError.invalidRSDOutput(error.localizedDescription)
+        }
+
+        guard let entriesByDeviceID = raw as? [String: [[String: Any]]] else {
+            throw LocateError.invalidRSDOutput("tunneld list response was not a device map")
+        }
+
+        var endpointsByDeviceID: [String: RSDEndpoint] = [:]
+        for (deviceID, entries) in entriesByDeviceID {
+            guard let entry = entries.first,
+                  let host = entry["tunnel-address"] as? String,
+                  let port = Self.portText(from: entry["tunnel-port"]) else {
+                continue
+            }
+            endpointsByDeviceID[deviceID] = RSDEndpoint(host: host, port: port)
+        }
+
+        return TunneldListResponse(endpointsByDeviceID: endpointsByDeviceID)
+    }
+
+    public func endpoint(for deviceID: String) -> RSDEndpoint? {
+        endpointsByDeviceID[deviceID]
+    }
+
+    private static func portText(from value: Any?) -> String? {
+        switch value {
+        case let port as Int:
+            return String(port)
+        case let port as NSNumber:
+            return port.stringValue
+        case let port as String where Int(port) != nil:
+            return port
+        default:
+            return nil
+        }
+    }
+}
+
+public enum TunneldProtocol {
+    public static let socketPath = "/var/run/jp.cinca.LocateApp.tunneld.sock"
+
+    public static func requestData(command: String, deviceID: String? = nil) throws -> Data {
+        var request: [String: String] = ["command": command]
+        if let deviceID {
+            request["udid"] = deviceID
+        }
+        return try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+    }
+
+    public static func errorMessage(from jsonText: String) -> String? {
+        guard let data = jsonText.data(using: .utf8),
+              let entry = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = entry["error"] as? String,
+              !error.isEmpty else {
+            return nil
+        }
+        return error
+    }
+}
+
 public struct Coordinate: Equatable, Sendable {
     public let latitude: Double
     public let longitude: Double
@@ -219,6 +328,10 @@ public struct LocatePaths: Equatable, Sendable {
 
     public var stateDirectory: URL {
         stateRoot.appendingPathComponent(".locateapp", isDirectory: true)
+    }
+
+    public var tunneldSocketPath: String {
+        TunneldProtocol.socketPath
     }
 
     private static func bundledHelper(in resources: URL, fileManager: FileManager) -> URL? {
