@@ -6,7 +6,7 @@
 - Show selected destination, current moved location, iPhone connection state, and state/log folder separately.
 - Offer direct coordinate entry for users who already know latitude/longitude.
 - Make reset a reliable safety action even after relaunch, cable reconnect, or stale tunnel state.
-- Make every destructive or privileged action explain what will happen before the macOS prompt appears.
+- Make every destructive or privileged action explain what will happen before macOS asks for approval.
 
 ## UX Designer View
 
@@ -14,7 +14,7 @@
 - Primary action should be singular and obvious: `Move iPhone Here`.
 - Search should sit above the map controls, not hidden in settings.
 - The UI should distinguish selected destination from current moved location to avoid accidental changes.
-- Busy states should say what the app is waiting for: device, administrator prompt, tunnel, DDI, or set process.
+- Busy states should say what the app is waiting for: device, SMAppService approval, tunnel, DDI, or set process.
 - Raw technical logs should be available but not dominate the panel.
 
 ## CTO View
@@ -29,6 +29,10 @@
 ## Deferred Decisions
 
 - Whether the GitHub repository should be public or private. Default is private for now.
-- Whether to package `pymobiledevice3` inside the `.app` or keep the repo-local helper during MVP.
-- Whether to move to a privileged helper tool instead of `osascript` administrator prompts.
+- Whether to keep producing lightweight repo-local debug app bundles, or make
+  helper/tunneld bundling the default for all local app builds.
+- Harden the bundled `LocateTunneldDaemon` IPC further with an app-owned XPC
+  protocol and code-signing checks. The current LaunchDaemon already avoids the
+  generic `pymobiledevice3 remote tunneld` HTTP API and exposes only a
+  root/admin Unix-domain socket with limited start/list/stop commands.
 - Whether to implement the official Xcode route as a fallback now or only after a compatibility break.

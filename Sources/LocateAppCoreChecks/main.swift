@@ -45,6 +45,22 @@ final class RecordingSleepAssertionClient: SleepAssertionClient, @unchecked Send
     }
 }
 
+final class RecordingActivityClient: AppActivityClient, @unchecked Sendable {
+    final class Token {}
+
+    var createdReasons: [String] = []
+    var endedTokenCount = 0
+
+    func begin(reason: String) -> AnyObject {
+        createdReasons.append(reason)
+        return Token()
+    }
+
+    func end(_ token: AnyObject) {
+        endedTokenCount += 1
+    }
+}
+
 func runChecks() throws {
     let json = """
     [
@@ -125,6 +141,20 @@ func runChecks() throws {
     }
     try check(deinitSleepClient.releasedIDs == [100], "sleep preventer should release on deinit")
 
+    let activityClient = RecordingActivityClient()
+    let appNapPreventer = AppNapPreventer(client: activityClient, reason: "LocateApp is continuously monitoring location")
+    try check(!appNapPreventer.isActive, "App Nap preventer should start inactive")
+    appNapPreventer.acquire()
+    try check(appNapPreventer.isActive, "App Nap preventer should be active after acquire")
+    try check(activityClient.createdReasons == ["LocateApp is continuously monitoring location"], "App Nap preventer should create one activity")
+    appNapPreventer.acquire()
+    try check(activityClient.createdReasons.count == 1, "App Nap preventer should not duplicate activities")
+    appNapPreventer.release()
+    try check(!appNapPreventer.isActive, "App Nap preventer should be inactive after release")
+    try check(activityClient.endedTokenCount == 1, "App Nap preventer should end the active activity")
+    appNapPreventer.release()
+    try check(activityClient.endedTokenCount == 1, "App Nap preventer should ignore duplicate releases")
+
     let paths = LocatePaths(
         root: URL(fileURLWithPath: "/repo"),
         pymobiledevicePath: URL(fileURLWithPath: "/repo/.venv/bin/pymobiledevice3")
@@ -155,6 +185,17 @@ func runChecks() throws {
         "/repo/.venv/bin/pymobiledevice3", "developer", "dvt", "simulate-location",
         "clear", "--rsd", "fd99:1792:87b6::1", "54429"
     ], "clear command mismatch")
+    try check(
+        paths.tunneldSocketPath == "/var/run/jp.cinca.LocateApp.tunneld.sock",
+        "tunneld socket path mismatch"
+    )
+    let tunneldStartRequest = try JSONSerialization.jsonObject(
+        with: TunneldProtocol.requestData(command: "start-tunnel", deviceID: device.identifier)
+    ) as? [String: String]
+    try check(
+        tunneldStartRequest == ["command": "start-tunnel", "udid": "00008150"],
+        "tunneld start request mismatch"
+    )
     try check(
         paths.stateDirectory.path == "/repo/.locateapp",
         "repo-local state directory mismatch"
@@ -191,39 +232,9 @@ func runChecks() throws {
 
     try check(Shell.quote("abc") == "'abc'", "simple shell quote mismatch")
     try check(Shell.quote("a'b") == "'a'\\''b'", "single quote escaping mismatch")
-    try check(AppleScript.quote("echo hi") == "\"echo hi\"", "simple AppleScript quote mismatch")
-    try check(AppleScript.quote("echo \"hi\"") == "\"echo \\\"hi\\\"\"", "AppleScript double quote escaping mismatch")
-    try check(AppleScript.quote("c:\\tmp") == "\"c:\\\\tmp\"", "AppleScript backslash escaping mismatch")
 
     let files = SessionFiles(directory: URL(fileURLWithPath: "/repo/.locateapp"))
     let sessionCommands = LocateSessionCommands(paths: paths, files: files)
-    let adminScript = sessionCommands.adminTunnelScript(device: device)
-    try check(
-        adminScript.script.contains("&& ('/repo/.venv/bin/pymobiledevice3'"),
-        "admin tunnel script should background inside a grouped shell command"
-    )
-    try check(
-        adminScript.script.contains("'/repo/.venv/bin/pymobiledevice3' 'lockdown' 'start-tunnel'"),
-        "admin tunnel script is missing tunnel command"
-    )
-    try check(
-        !adminScript.script.contains("nohup"),
-        "admin tunnel script should not use nohup because AppleScript administrator shells can reject console detach"
-    )
-    try check(
-        adminScript.script.contains("echo $! > '/repo/.locateapp/tunnel.pid'"),
-        "admin tunnel script is missing pid write"
-    )
-    try check(adminScript.osascriptCommand[0] == "/usr/bin/osascript", "osascript command mismatch")
-    try check(adminScript.osascriptCommand[2].contains("administrator privileges"), "admin prompt missing")
-    try check(adminScript.osascriptCommand[2].contains("do shell script \""), "AppleScript shell string should use double quotes")
-    try check(!adminScript.osascriptCommand[2].contains("do shell script '"), "AppleScript shell string should not use shell quotes")
-
-    let stopTunnel = sessionCommands.adminStopTunnelScript()
-    try check(
-        stopTunnel.script.contains("rm -f '/repo/.locateapp/tunnel.pid'"),
-        "stop tunnel script should remove tunnel state"
-    )
 
     let persistentSet = sessionCommands.persistentSetCommand(endpoint: endpoint, coordinate: coordinate)
     try check(persistentSet[0] == "/bin/sh", "persistent set should run through sh")
@@ -273,6 +284,22 @@ func runChecks() throws {
         "continuity should be active when tunnel and set process are both running"
     )
     try check(
+        LocationContinuityAssessment.assess(
+            tunnelRunning: true,
+            setProcessRunning: true,
+            tunnelHealthCheckSucceeded: false
+        ) == .uncertain(.healthCheckFailed),
+        "continuity should be uncertain when tunnel health check fails"
+    )
+    try check(
+        LocationContinuityAssessment.assess(
+            tunnelRunning: true,
+            setProcessRunning: true,
+            setErrorOutputAdvanced: true
+        ) == .uncertain(.setProcessErrorOutput),
+        "continuity should be uncertain when set stderr advances"
+    )
+    try check(
         LocationContinuityAssessment.assess(tunnelRunning: false, setProcessRunning: true) == .uncertain(.tunnelClosed),
         "continuity should be uncertain when the tunnel closes"
     )
@@ -295,12 +322,12 @@ func runChecks() throws {
 
     let recoveryPolicy = LocationAutoRecoveryPolicy()
     try check(
-        recoveryPolicy.maxAttempts == 3,
-        "auto recovery should allow three attempts"
+        recoveryPolicy.keepsTryingUntilDeviceReturns,
+        "auto recovery should keep trying until the device returns by default"
     )
     try check(
-        recoveryPolicy.attempts.map(\.number) == [1, 2, 3],
-        "auto recovery attempts should be numbered 1 through 3"
+        recoveryPolicy.maxAttempts == nil,
+        "auto recovery should not have a finite attempt cap by default"
     )
     try check(
         recoveryPolicy.delayBeforeAttempt(1) == 0,
@@ -311,30 +338,51 @@ func runChecks() throws {
         "second auto recovery attempt should wait 10 seconds"
     )
     try check(
-        recoveryPolicy.delayBeforeAttempt(3) == 10,
-        "third auto recovery attempt should wait 10 seconds"
+        recoveryPolicy.delayBeforeAttempt(3) == 20,
+        "third auto recovery attempt should use exponential backoff"
     )
     try check(
-        recoveryPolicy.delayBeforeAttempt(4) == nil,
-        "fourth auto recovery attempt should not be allowed"
+        recoveryPolicy.delayBeforeAttempt(8) == 120,
+        "auto recovery delay should cap at the maximum delay"
     )
     try check(
-        recoveryPolicy.progressText(for: LocationAutoRecoveryAttempt(number: 2, total: 3)) == "自動再接続中です... 2/3",
+        recoveryPolicy.progressText(for: LocationAutoRecoveryAttempt(number: 2, total: nil)) == "自動再接続中です... 2回目",
         "auto recovery progress text mismatch"
+    )
+    let finiteRecoveryPolicy = LocationAutoRecoveryPolicy(maxAttempts: 3)
+    try check(
+        finiteRecoveryPolicy.attempts.map(\.number) == [1, 2, 3],
+        "finite recovery attempts should be numbered 1 through 3"
+    )
+    try check(
+        finiteRecoveryPolicy.delayBeforeAttempt(4) == nil,
+        "finite recovery policy should stop after max attempts"
+    )
+    try check(
+        finiteRecoveryPolicy.progressText(for: LocationAutoRecoveryAttempt(number: 2, total: 3)) == "自動再接続中です... 2/3",
+        "finite auto recovery progress text mismatch"
+    )
+    try check(
+        LocationAutoRecoveryTunnelPolicy.shouldForceRestart(for: .tunnelClosed),
+        "tunnel closure should force a tunnel restart"
+    )
+    try check(
+        !LocationAutoRecoveryTunnelPolicy.shouldForceRestart(for: .setProcessStopped),
+        "set-process recovery should reuse a healthy tunnel"
+    )
+    try check(
+        !LocationAutoRecoveryTunnelPolicy.shouldForceRestart(for: .setProcessErrorOutput),
+        "set stderr recovery should reuse a healthy tunnel"
     )
     try check(
         LocationAutoRecoveryErrorClassifier.isUserCancellation(
-            "管理者認証がキャンセルされました。もう一度実行し、表示された認証を承認してください。"
+            "操作がキャンセルされました。必要に応じて特権tunneldを登録してください。"
         ),
-        "Japanese administrator cancellation should be non-retryable"
+        "Japanese cancellation should be non-retryable"
     )
     try check(
         LocationAutoRecoveryErrorClassifier.isUserCancellation("User canceled."),
         "English user cancellation should be non-retryable"
-    )
-    try check(
-        LocationAutoRecoveryErrorClassifier.isUserCancellation("osascript error -128"),
-        "AppleScript -128 cancellation should be non-retryable"
     )
     try check(
         !LocationAutoRecoveryErrorClassifier.isUserCancellation("No route to host"),
@@ -360,6 +408,29 @@ func runChecks() throws {
         recoveryPolicy.delayBeforeAttempt(-1) == nil,
         "negative-numbered recovery attempts should not be allowed"
     )
+    let tunnelPreparationPolicy = TunnelPreparationPolicy()
+    try check(
+        tunnelPreparationPolicy.timeoutSeconds == 60,
+        "tunnel preparation should wait up to 60 seconds by default"
+    )
+    try check(
+        tunnelPreparationPolicy.maximumPollCount == 120,
+        "tunnel preparation poll count should match timeout and interval"
+    )
+    try check(
+        !TunnelStateInvalidationPolicy.shouldInvalidateTunnel(for: LocateError.invalidCoordinate("bad input")),
+        "coordinate validation errors should not invalidate a healthy tunnel"
+    )
+    try check(
+        TunnelStateInvalidationPolicy.shouldInvalidateTunnel(for: LocateError.invalidRSDOutput("bad tunnel")),
+        "invalid RSD output should invalidate tunnel state"
+    )
+    try check(
+        TunnelStateInvalidationPolicy.shouldInvalidateTunnel(
+            for: LocateError.processControlFailed("No route to host")
+        ),
+        "connection errors should invalidate tunnel state"
+    )
     try check(
         AppLaunchUpdateCheckPolicy.shouldCheckOnLaunch(automaticallyChecksForUpdates: true),
         "launch update check should run when automatic checks are enabled"
@@ -374,6 +445,15 @@ func runChecks() throws {
     try checkThrows("invalid pid did not throw") {
         _ = try PIDFile.parse("nope")
     }
+
+    let tunneldStartResponse = try TunneldStartTunnelResponse.parse(#"{"interface":"usbmux-00008150-USB","port":54429,"address":"fd99:1792:87b6::1"}"#)
+    try check(tunneldStartResponse.endpoint == endpoint, "tunneld start response endpoint mismatch")
+    try checkThrows("invalid tunneld start response did not throw") {
+        _ = try TunneldStartTunnelResponse.parse(#"{"error":"task not created"}"#)
+    }
+    let tunneldListResponse = try TunneldListResponse.parse(#"{"00008150":[{"tunnel-address":"fd99:1792:87b6::1","tunnel-port":54429,"interface":"usbmux"}]}"#)
+    try check(tunneldListResponse.endpoint(for: "00008150") == endpoint, "tunneld list response endpoint mismatch")
+    try check(tunneldListResponse.endpoint(for: "missing") == nil, "tunneld list response should not return endpoint for missing device")
 
     let runner = ProcessRunner()
     let quickOutput = try runner.run(["/bin/echo", "ok"], timeout: 1)

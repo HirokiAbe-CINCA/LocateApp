@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "LocateAppCore", targets: ["LocateAppCore"]),
         .executable(name: "LocateApp", targets: ["LocateApp"]),
+        .executable(name: "LocateTunneldDaemon", targets: ["LocateTunneldDaemon"]),
         .executable(name: "LocateAppCoreChecks", targets: ["LocateAppCoreChecks"])
     ],
     dependencies: [
@@ -23,6 +24,10 @@ let package = Package(
                 "LocateAppCore",
                 .product(name: "Sparkle", package: "Sparkle")
             ]
+        ),
+        .executableTarget(
+            name: "LocateTunneldDaemon",
+            dependencies: ["LocateAppCore"]
         ),
         .executableTarget(
             name: "LocateAppCoreChecks",

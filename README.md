@@ -30,21 +30,25 @@ open dist/LocateApp.app
 
 `build_app_bundle.sh` builds a debug app bundle by default to keep local
 iteration light. Use `CONFIGURATION=release ./scripts/build_app_bundle.sh` when
-you have enough free disk space and want a release build.
+you have enough free disk space and want a release build. The lightweight
+default bundle is appropriate for UI smoke checks; real device movement needs
+the helper/tunneld bundle below.
 
-For a self-contained app bundle that can be copied to another Mac without a
-repo-local `.venv`, bundle the helper:
+For a self-contained app bundle that can move a device and recover unattended,
+bundle the helper and the SMAppService LaunchDaemon plist:
 
 ```bash
-BUNDLE_HELPER=1 CONFIGURATION=release ./scripts/build_app_bundle.sh
+BUNDLE_HELPER=1 ENABLE_TUNNELD=1 CONFIGURATION=release ./scripts/build_app_bundle.sh
 ```
 
 In the app:
 
 1. Connect and unlock the iPhone.
-2. Search for a place by name, enter `lat, lon`, or click a point on the map.
-3. Click `この場所に移動`.
-4. Approve the macOS administrator prompt if it appears.
+2. Open `自動再接続`, register `特権tunneld`, then approve LocateApp in
+   macOS Login Items when System Settings asks. This is a one-time setup for
+   signed/notarized helper builds.
+3. Search for a place by name, enter `lat, lon`, or click a point on the map.
+4. Click `この場所に移動`.
 
 Use `接続を確認` only when the iPhone status does not update after connecting or
 unlocking the device. The app prepares the iPhone communication path
@@ -62,14 +66,24 @@ putting the Mac to sleep, quitting the app, shutting down the Mac, or restarting
 the iPhone can clear the simulated location.
 
 LocateApp monitors the stored tunnel and set-location process while a moved
-location is active. If the tunnel closes or the helper process stops, the app
-automatically tries to rebuild the developer connection and reapply the previous
-coordinate up to three times, waiting 10 seconds between retries. If recovery
-succeeds, the moved location remains active. If recovery fails or administrator
-authorization is canceled, the app marks the current movement as uncertain
-instead of continuing to present it as definitely active. When that happens,
-reconnect and unlock the iPhone, then use `前回の場所へ再移動` to rebuild the
-developer connection and apply the previous coordinate again.
+location is active. The panel shows the moved duration, whether monitoring is
+running, and the last continuity check time. If the set-location process stops,
+the app reuses a healthy existing tunnel and reapplies the previous coordinate
+without rebuilding the tunnel. If the tunnel closes, a health check fails, the
+iPhone reconnects, or the Mac wakes from sleep, the app rebuilds the RSD tunnel
+through the approved launchd `tunneld` service and reapplies the previous
+coordinate without showing an administrator prompt. Automatic recovery retries
+with exponential backoff and, by default, keeps waiting for the same iPhone to
+reconnect instead of giving up after a fixed number of attempts. The retry
+behavior and wake recovery option can be adjusted from the `自動再接続`
+disclosure in the panel.
+
+The app also watches process exit notifications in addition to periodic checks,
+records recent continuity events in `イベントログ`, and sends macOS
+notifications when continuity is lost or restored. If the helper plist is not
+bundled, not registered, or waiting for System Settings approval, recovery stops
+with an explicit `特権tunneld` status instead of falling back to repeated
+administrator prompts.
 
 `移動を解除` terminates the stored set-location process and sends the DVT
 clear-location command through a recovered tunnel when needed. If the iPhone is
@@ -94,9 +108,13 @@ command fails.
 5. If reset cannot reach the iPhone, restart the iPhone. iOS restart is the
    authoritative fallback for clearing simulated location.
 
-Local debug builds are ad-hoc signed. Release packages embed the
-`pymobiledevice3` helper inside the app bundle, so the app can run without a
-repo-local `.venv`.
+Local debug builds are ad-hoc signed and may be useful for UI smoke checks.
+Signed, notarized helper builds embed the `pymobiledevice3` helper plus
+`Contents/Library/LaunchDaemons/jp.cinca.LocateApp.tunneld.plist`, so the app
+can run without a repo-local `.venv` and can recover unattended after the
+one-time SMAppService approval. The privileged daemon is `LocateTunneldDaemon`;
+it exposes only a local Unix-domain socket command surface for starting,
+listing, and stopping app-managed RSD tunnel processes.
 
 ## Install from GitHub Releases
 
@@ -210,12 +228,17 @@ hold is 5 seconds; pass `--hold-seconds` to change it:
 ## Known Limits
 
 - The app currently targets the proven iOS 17+ RSD/DVT route.
-- The RSD tunnel still requires macOS administrator approval.
+- Unattended tunnel rebuilds require a signed/notarized app bundle with the
+  bundled LaunchDaemon helper registered through `SMAppService` and approved in
+  macOS Login Items. Ad-hoc debug builds can verify UI and bundle shape, but
+  should not be treated as proof that macOS will approve the daemon.
 - Location simulation should be treated as active only while the Mac is awake,
   the app/helper process is running, and the iPhone remains connected by USB.
   On MacBooks, keep the lid open unless macOS is kept awake by clamshell mode.
-- Reset may ask for administrator approval again while it cleans up the RSD
-  tunnel process.
+- The bundled `LocateTunneldDaemon` uses a local Unix-domain socket restricted
+  to root/admin and only accepts limited start/list/stop tunnel commands. A
+  future hardening pass can replace this with an app-owned XPC protocol and
+  code-signing checks between the app and daemon.
 - If a future iOS or `pymobiledevice3` release changes this behavior, the app
   should fall back to the official Xcode route. See
   `docs/ios-compatibility-strategy.md`.
@@ -226,6 +249,7 @@ hold is 5 seconds; pass `--hold-seconds` to change it:
 bash scripts/run_swift_core_checks.sh
 .venv/bin/python -m pytest
 ./scripts/build_app_bundle.sh
+VERIFY_BUILD=1 ./scripts/verify_tunneld_bundle.sh
 ./scripts/e2e_smoke.sh
 ```
 

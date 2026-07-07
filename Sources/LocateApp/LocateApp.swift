@@ -48,6 +48,7 @@ struct LocateAppMain: App {
                 .onAppear {
                     model.startLocationContinuityMonitoring()
                     model.restorePreviousSession()
+                    model.refreshPrivilegedTunneldStatus()
                     model.refreshDevices()
                 }
         }

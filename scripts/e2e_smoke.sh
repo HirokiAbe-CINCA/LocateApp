@@ -73,9 +73,6 @@ tell application "System Events"
     my assertNotContains(visibleText, "反映")
     my assertNotContains(visibleText, "よく使う場所")
     my assertNotContains(visibleText, "通信を準備")
-    my assertNotContains(visibleText, "ログ")
-    my assertNotContains(visibleText, "自動再接続中です")
-    my assertNotContains(visibleText, "自動再接続しました")
 
     tell window 1
       set panel to scroll area 1 of group 1
@@ -88,14 +85,18 @@ tell application "System Events"
       if (count of text fields of group 2 of panel) is not 2 then
         error "Expected search and coordinate fields in destination group"
       end if
-      set destinationButtonCount to count of buttons of group 2 of panel
-      set expectedDestinationButtonCount to 3
-      if (my textDump(group 2 of panel)) contains "前回の移動先の可能性" then
-        set expectedDestinationButtonCount to 4
+      set actionButtonCount to count of buttons of group 2 of panel
+      if actionButtonCount < 3 then
+        error "Expected search, move, and reset actions in destination group"
       end if
-      if destinationButtonCount is not expectedDestinationButtonCount then
-        error "Expected destination group to expose " & expectedDestinationButtonCount & " actions, got " & destinationButtonCount
+      set disclosureItems to UI elements of group 2 of panel whose role is "AXDisclosureTriangle"
+      set disclosureCount to count of disclosureItems
+      if disclosureCount < 2 then
+        error "Expected auto-reconnect and event log disclosures in destination group"
       end if
+      set destinationText to my textDump(group 2 of panel)
+      my assertContains(destinationText, "選択中の移動先")
+      my assertContains(destinationText, "35.681236")
 
       set focused of text field 2 of group 2 of panel to true
       set value of text field 2 of group 2 of panel to "35.659494, 139.700550"

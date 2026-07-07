@@ -96,3 +96,84 @@ public final class SleepPreventer: @unchecked Sendable {
         }
     }
 }
+
+public protocol AppActivityClient: Sendable {
+    func begin(reason: String) -> AnyObject
+    func end(_ token: AnyObject)
+}
+
+public struct ProcessInfoActivityClient: AppActivityClient {
+    public init() {}
+
+    public func begin(reason: String) -> AnyObject {
+        ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled],
+            reason: reason
+        ) as AnyObject
+    }
+
+    public func end(_ token: AnyObject) {
+        guard let activity = token as? NSObjectProtocol else {
+            return
+        }
+        ProcessInfo.processInfo.endActivity(activity)
+    }
+}
+
+public final class AppNapPreventer: @unchecked Sendable {
+    private let client: AppActivityClient
+    private let reason: String
+    private let lock = NSLock()
+    private var activityToken: AnyObject?
+
+    public init(
+        client: AppActivityClient = ProcessInfoActivityClient(),
+        reason: String = "LocateApp is maintaining iPhone location simulation"
+    ) {
+        self.client = client
+        self.reason = reason
+    }
+
+    deinit {
+        release()
+    }
+
+    public var isActive: Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return activityToken != nil
+    }
+
+    public func acquire() {
+        lock.lock()
+        if activityToken != nil {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        let newToken = client.begin(reason: reason)
+
+        lock.lock()
+        if activityToken == nil {
+            activityToken = newToken
+            lock.unlock()
+        } else {
+            lock.unlock()
+            client.end(newToken)
+        }
+    }
+
+    public func release() {
+        lock.lock()
+        let activeToken = activityToken
+        activityToken = nil
+        lock.unlock()
+
+        if let activeToken {
+            client.end(activeToken)
+        }
+    }
+}
